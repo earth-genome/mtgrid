@@ -2,7 +2,7 @@ package majortom
 
 import (
 	"fmt"
-	"github.com/jxskiss/base62"
+	"github.com/mmcloughlin/geohash"
 	"github.com/paulmach/orb"
 	"math"
 	"math/big"
@@ -13,6 +13,14 @@ const (
 	LatDeg = 180.0
 	LonDeg = 90.0
 )
+
+type GridCell struct {
+	orb.Polygon
+}
+
+func (gc *GridCell) Id() string {
+	return geohash.EncodeWithPrecision(gc.Bound().Center().Lat(), gc.Bound().Center().Lon(), 7)
+}
 
 type Grid struct {
 	Size    int64
@@ -38,30 +46,21 @@ func (g *Grid) lonSpacing(lat float64) float64 {
 	return 360 / cols
 }
 
-//func (g *Grid) xyToPoly(x int64 , y int64)(*orb.Polygon, error){
-//
-//}
-
 func toRad(deg float64) float64 {
 	return deg * math.Pi / LatDeg
-}
-func id(x int64, y int64) string {
-	xStr := base62.Encode(base62.FormatInt(x))
-	yStr := base62.Encode(base62.FormatInt(y))
-	return fmt.Sprintf("%s.%s", xStr, yStr)
 }
 
 func New(size int64, overlap bool) *Grid {
 	return &Grid{Size: size, Overlap: overlap}
 }
 
-func (g *Grid) TilePolygon(aoi *orb.Polygon) ([]orb.Polygon, error) {
+func (g *Grid) TilePolygon(aoi *orb.Polygon) ([]GridCell, error) {
 
 	rows := g.rowCount()
 	startRow := max(int64(0), int64((aoi.Bound().Min.Lat()+LonDeg)/g.latSpacing(rows)))
 	endRow := min(rows, int64((aoi.Bound().Max.Lat()+LonDeg)/g.latSpacing(rows))+1)
 
-	tiles := make([]orb.Polygon, 0)
+	tiles := make([]GridCell, 0)
 
 	for rowIdx := int64(startRow); rowIdx <= endRow; rowIdx++ {
 		lat := g.rowLat(rowIdx)
@@ -82,7 +81,7 @@ func (g *Grid) TilePolygon(aoi *orb.Polygon) ([]orb.Polygon, error) {
 				{lon, lat + latSpacing},
 				{lon, lat}}}
 			if p.Bound().Intersects(aoi.Bound()) {
-				tiles = append(tiles, p)
+				tiles = append(tiles, GridCell{p})
 			}
 			eastOverlapCell := orb.Polygon{{
 				{lon + halfLonSpacing, lat},
@@ -92,7 +91,7 @@ func (g *Grid) TilePolygon(aoi *orb.Polygon) ([]orb.Polygon, error) {
 				{lon + halfLonSpacing, lat},
 			}}
 			if eastOverlapCell.Bound().Intersects(aoi.Bound()) {
-				tiles = append(tiles, eastOverlapCell)
+				tiles = append(tiles, GridCell{eastOverlapCell})
 			}
 			southOverlapCell := orb.Polygon{{
 				{lon, lat - halfLatSpacing},
@@ -102,14 +101,14 @@ func (g *Grid) TilePolygon(aoi *orb.Polygon) ([]orb.Polygon, error) {
 				{lon, lat - halfLatSpacing},
 			}}
 			if southOverlapCell.Bound().Intersects(aoi.Bound()) {
-				tiles = append(tiles, southOverlapCell)
+				tiles = append(tiles, GridCell{southOverlapCell})
 			}
 		}
 	}
 	return tiles, nil
 }
 
-func (g *Grid) TilePolygonToChan(aoi *orb.MultiPolygon, geochan chan orb.Polygon) {
+func (g *Grid) TilePolygonToChan(aoi *orb.MultiPolygon, geochan chan GridCell) {
 
 	rows := g.rowCount()
 	startRow := max(int64(0), int64((aoi.Bound().Min.Lat()+LonDeg)/g.latSpacing(rows)))
@@ -134,7 +133,7 @@ func (g *Grid) TilePolygonToChan(aoi *orb.MultiPolygon, geochan chan orb.Polygon
 				{lon, lat + latSpacing},
 				{lon, lat}}}
 			if p.Bound().Intersects(aoi.Bound()) {
-				geochan <- p
+				geochan <- GridCell{p}
 			}
 			eastOverlapCell := orb.Polygon{{
 				{lon + halfLonSpacing, lat},
@@ -144,7 +143,7 @@ func (g *Grid) TilePolygonToChan(aoi *orb.MultiPolygon, geochan chan orb.Polygon
 				{lon + halfLonSpacing, lat},
 			}}
 			if eastOverlapCell.Bound().Intersects(aoi.Bound()) {
-				geochan <- eastOverlapCell
+				geochan <- GridCell{eastOverlapCell}
 			}
 			southOverlapCell := orb.Polygon{{
 				{lon, lat - halfLatSpacing},
@@ -154,27 +153,13 @@ func (g *Grid) TilePolygonToChan(aoi *orb.MultiPolygon, geochan chan orb.Polygon
 				{lon, lat - halfLatSpacing},
 			}}
 			if southOverlapCell.Bound().Intersects(aoi.Bound()) {
-				geochan <- southOverlapCell
+				geochan <- GridCell{southOverlapCell}
 			}
 		}
 	}
 	//indicate we're done
 	close(geochan)
 }
-
-//func (g *Grid) IdToCell(id string) (*orb.Polygon, error) {
-//
-//	cords := strings.Split(id, ".")
-//	if len(cords) != 2 {
-//		return nil, fmt.Errorf("invalid id: %s", id)
-//	}
-//	rows := g.rowCount()
-//	startRow := max(int64(0), int64((aoi.Bound().Min.Lat()+90)/g.latSpacing(rows)))
-//	endRow := min(rows, int64((aoi.Bound().Max.Lat()+90)/g.latSpacing(rows))+1)
-//
-//	tiles := int64(0)
-//
-//}
 
 func (g *Grid) CountCells(aoi *orb.Polygon) *big.Int {
 
@@ -206,4 +191,23 @@ func (g *Grid) CountCells(aoi *orb.Polygon) *big.Int {
 	fmt.Println()
 	fmt.Printf("total cells %v", tiles)
 	return tiles
+}
+
+func (g *Grid) CellFromId(id string) (*GridCell, error) {
+
+	box := geohash.BoundingBox(id)
+	p := orb.Bound{
+		Min: orb.Point{box.MinLng, box.MinLat},
+		Max: orb.Point{box.MaxLng, box.MaxLat},
+	}.ToPolygon()
+	cells, err := g.TilePolygon(&p)
+	if err != nil {
+		return nil, err
+	}
+	for _, cell := range cells {
+		if cell.Id() == id {
+			return &cell, nil
+		}
+	}
+	return nil, fmt.Errorf("cell with id %s not found", id)
 }

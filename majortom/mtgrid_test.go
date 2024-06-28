@@ -1,21 +1,10 @@
 package majortom
 
 import (
-	"encoding/binary"
 	"fmt"
-	"github.com/apache/arrow/go/v16/arrow"
-	"github.com/apache/arrow/go/v16/arrow/array"
-	"github.com/apache/arrow/go/v16/arrow/memory"
-	"github.com/apache/arrow/go/v16/parquet"
-	"github.com/apache/arrow/go/v16/parquet/compress"
-	"github.com/apache/arrow/go/v16/parquet/pqarrow"
 	"github.com/mmcloughlin/geohash"
 	"github.com/paulmach/orb"
-	"github.com/paulmach/orb/encoding/wkb"
 	"github.com/paulmach/orb/geojson"
-	"io"
-	"log"
-	"os"
 	"testing"
 )
 
@@ -47,6 +36,42 @@ var world = `{
             [
               -180.0,
               -85.06
+            ]
+          ]
+        ],
+        "type": "Polygon"
+      }
+    }
+  ]
+}`
+var bigSouthampton = `{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {},
+      "geometry": {
+        "coordinates": [
+          [
+            [
+              -76.35673421721803,
+              39.55614384974018
+            ],
+            [
+              -76.35673421721803,
+              39.53123810591927
+            ],
+            [
+              -76.3131967920373,
+              39.53123810591927
+            ],
+            [
+              -76.3131967920373,
+              39.55614384974018
+            ],
+            [
+              -76.35673421721803,
+              39.55614384974018
             ]
           ]
         ],
@@ -96,7 +121,7 @@ var southampton = `
 `
 
 func TestCount(t *testing.T) {
-	fc, err := geojson.UnmarshalFeatureCollection([]byte(world))
+	fc, err := geojson.UnmarshalFeatureCollection([]byte(bigSouthampton))
 	if err != nil {
 		t.FailNow()
 	}
@@ -135,77 +160,75 @@ func TestSimple(t *testing.T) {
 	t.Log(string(js))
 }
 
-func TestWorld(t *testing.T) {
+// tests that 2 different polygons will result in aligned grid cells
+func TestOffsets(t *testing.T) {
 
-	f, _ := os.Open("world.geojson")
-	data, _ := io.ReadAll(f)
-	fc, _ := geojson.UnmarshalFeatureCollection(data)
-	//fc, _ := geojson.UnmarshalFeatureCollection([]byte(southampton))
-
-	//setup file output
-	outFile, err := os.Create("majortom.parquet")
+	fc, err := geojson.UnmarshalFeatureCollection([]byte(southampton))
 	if err != nil {
-		log.Fatal("failed to open output file")
+		t.FailNow()
 	}
-
-	schema := arrow.NewSchema([]arrow.Field{
-		{Name: "geom", Type: arrow.BinaryTypes.Binary},
-		{Name: "hash", Type: arrow.BinaryTypes.String},
-	}, nil)
-	props := parquet.NewWriterProperties(
-		parquet.WithCompression(compress.Codecs.Snappy),
-		parquet.WithRootName("spark_schema"),
-		parquet.WithRootRepetition(parquet.Repetitions.Required),
-	)
-	pqWriter, err := pqarrow.NewFileWriter(schema, outFile, props, pqarrow.DefaultWriterProps())
-	if err != nil {
-		log.Fatal("failed to create output writer")
-	}
-
-	defer pqWriter.Close()
-
-	pool := memory.NewGoAllocator()
-	b := array.NewRecordBuilder(pool, schema)
-	defer b.Release()
-	//
-	geochan := make(chan orb.Polygon)
+	g := fc.Features[0].Geometry
+	p := g.(orb.Polygon)
 	grid := New(320, true)
-	p := fc.Features[0].Geometry.(orb.MultiPolygon)
-	go grid.TilePolygonToChan(&p, geochan)
-	count := 0
-	for poly := range geochan {
+	smallerAoiCells, err := grid.TilePolygon(&p)
 
-		if poly == nil {
-			continue
-		}
-		count++
-		hash := geohash.EncodeWithPrecision(poly.Bound().Center().Lat(), poly.Bound().Center().Lon(), 7)
-		blob, err := wkb.Marshal(poly, binary.BigEndian)
-		if err != nil {
-			t.FailNow()
-		}
-		err = writeRecord(b, pqWriter, blob, hash)
-		if err != nil {
-			t.FailNow()
-		}
-		if count%10000 == 0 {
-			log.Printf("Processed %d polygons", count)
-		}
+	fc, err = geojson.UnmarshalFeatureCollection([]byte(bigSouthampton))
+	if err != nil {
+		t.FailNow()
 	}
+	g = fc.Features[0].Geometry
+	p = g.(orb.Polygon)
+	largerAoiCells, err := grid.TilePolygon(&p)
+
+	t.Logf("largerAoi: %v", len(largerAoiCells))
+	t.Logf("smallerAoi: %v", len(smallerAoiCells))
+	//assert that all cells in the small aoi are also in the big aoi
+	for _, cell := range smallerAoiCells {
+		found := false
+		for _, cell2 := range largerAoiCells {
+
+			if cell2.Polygon.Equal(cell.Polygon) {
+				found = true
+			}
+		}
+		if !found {
+			t.Log("cell was not found")
+			t.Fail()
+		}
+
+	}
+
 }
 
-func writeRecord(b *array.RecordBuilder, pqWriter *pqarrow.FileWriter, geom []byte, hash string) error {
+func TestIds(t *testing.T) {
 
-	b.Field(0).(*array.BinaryBuilder).Append(geom)
-	b.Field(1).(*array.StringBuilder).AppendString(hash)
-
-	rec := b.NewRecord()
-	defer rec.Release()
-
-	err := pqWriter.WriteBuffered(rec)
+	fc, err := geojson.UnmarshalFeatureCollection([]byte(southampton))
 	if err != nil {
-		return fmt.Errorf("failed to write to parquet file: %w", err)
+		t.FailNow()
+	}
+	g := fc.Features[0].Geometry
+	p := g.(orb.Polygon)
+	grid := New(320, true)
+	cells, err := grid.TilePolygon(&p)
+	if err != nil {
+		t.FailNow()
 	}
 
-	return nil
+	for _, cell := range cells {
+		id := cell.Id()
+		foundCell, err := grid.CellFromId(id)
+		if err != nil {
+			t.Logf("error getting cell: %v", err)
+			t.FailNow()
+		}
+		if foundCell == nil {
+			t.Logf("error getting cell: %v", err)
+			t.FailNow()
+		}
+		if !foundCell.Polygon.Equal(cell.Polygon) {
+			t.Logf("cells are not equal!")
+			t.FailNow()
+		}
+	}
+
 }
