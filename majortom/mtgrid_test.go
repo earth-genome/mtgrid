@@ -8,42 +8,42 @@ import (
 	"testing"
 )
 
-var world = `{
-  "type": "FeatureCollection",
-  "features": [
-    {
-      "type": "Feature",
-      "properties": {},
-      "geometry": {
-        "coordinates": [
-          [
-            [
-              -180.0,
-              -85.06
-            ],
-            [
-              -180.0,
-              85.06
-            ],
-            [
-              180.0,
-              85.06
-            ],
-            [
-              180.0,
-              -85.06
-            ],
-            [
-              -180.0,
-              -85.06
-            ]
-          ]
-        ],
-        "type": "Polygon"
-      }
-    }
-  ]
-}`
+//	var world = `{
+//	 "type": "FeatureCollection",
+//	 "features": [
+//	   {
+//	     "type": "Feature",
+//	     "properties": {},
+//	     "geometry": {
+//	       "coordinates": [
+//	         [
+//	           [
+//	             -180.0,
+//	             -85.06
+//	           ],
+//	           [
+//	             -180.0,
+//	             85.06
+//	           ],
+//	           [
+//	             180.0,
+//	             85.06
+//	           ],
+//	           [
+//	             180.0,
+//	             -85.06
+//	           ],
+//	           [
+//	             -180.0,
+//	             -85.06
+//	           ]
+//	         ]
+//	       ],
+//	       "type": "Polygon"
+//	     }
+//	   }
+//	 ]
+//	}`
 var bigSouthampton = `{
   "type": "FeatureCollection",
   "features": [
@@ -170,7 +170,7 @@ func TestOffsets(t *testing.T) {
 	g := fc.Features[0].Geometry
 	p := g.(orb.Polygon)
 	grid := New(320, true)
-	smallerAoiCells, err := grid.TilePolygon(&p)
+	smallerAoiCells, _ := grid.TilePolygon(&p)
 
 	fc, err = geojson.UnmarshalFeatureCollection([]byte(bigSouthampton))
 	if err != nil {
@@ -178,7 +178,7 @@ func TestOffsets(t *testing.T) {
 	}
 	g = fc.Features[0].Geometry
 	p = g.(orb.Polygon)
-	largerAoiCells, err := grid.TilePolygon(&p)
+	largerAoiCells, _ := grid.TilePolygon(&p)
 
 	t.Logf("largerAoi: %v", len(largerAoiCells))
 	t.Logf("smallerAoi: %v", len(smallerAoiCells))

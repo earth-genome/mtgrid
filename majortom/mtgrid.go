@@ -19,7 +19,7 @@ type GridCell struct {
 }
 
 func (gc *GridCell) Id() string {
-	return geohash.EncodeWithPrecision(gc.Bound().Center().Lat(), gc.Bound().Center().Lon(), 7)
+	return geohash.Encode(gc.Bound().Center().Lat(), gc.Bound().Center().Lon())
 }
 
 type Grid struct {
@@ -108,6 +108,7 @@ func (g *Grid) TilePolygon(aoi *orb.Polygon) ([]GridCell, error) {
 	return tiles, nil
 }
 
+// TilePolygonToGrid bahves like TilePolygon
 func (g *Grid) TilePolygonToChan(aoi *orb.MultiPolygon, geochan chan GridCell) {
 
 	rows := g.rowCount()
