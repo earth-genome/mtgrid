@@ -2,8 +2,8 @@ package majortom
 
 import (
 	"fmt"
-	"github.com/mmcloughlin/geohash"
 	"github.com/paulmach/orb"
+	"github.com/pierrre/geohash"
 	"math"
 	"math/big"
 )
@@ -18,11 +18,8 @@ type GridCell struct {
 	orb.Polygon
 }
 
-func (gc *GridCell) Geohash(length uint) string {
-	return geohash.EncodeWithPrecision(gc.Bound().Center().Lat(), gc.Bound().Center().Lon(), length)
-}
 func (gc *GridCell) Id() string {
-	return geohash.EncodeWithPrecision(gc.Bound().Center().Lat(), gc.Bound().Center().Lon(), 20)
+	return geohash.Encode(gc.Bound().Center().Lat(), gc.Bound().Center().Lon(), 20)
 }
 
 type Grid struct {
@@ -199,10 +196,13 @@ func (g *Grid) CountCells(aoi *orb.Polygon) *big.Int {
 
 func (g *Grid) CellFromId(id string) (*GridCell, error) {
 
-	box := geohash.BoundingBox(id)
+	box, err := geohash.Decode(id)
+	if err != nil {
+		return nil, err
+	}
 	p := orb.Bound{
-		Min: orb.Point{box.MinLng, box.MinLat},
-		Max: orb.Point{box.MaxLng, box.MaxLat},
+		Min: orb.Point{box.Lon.Min, box.Lat.Min},
+		Max: orb.Point{box.Lat.Max, box.Lat.Max},
 	}.ToPolygon()
 	cells, err := g.TilePolygon(&p)
 	if err != nil {
