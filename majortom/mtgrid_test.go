@@ -2,9 +2,9 @@ package majortom
 
 import (
 	"fmt"
-	"github.com/mmcloughlin/geohash"
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/geojson"
+	"github.com/pierrre/geohash"
 	"testing"
 )
 
@@ -150,7 +150,7 @@ func TestSimple(t *testing.T) {
 
 	for _, f := range cells {
 		nf := geojson.NewFeature(f)
-		nf.Properties["id"] = geohash.EncodeWithPrecision(f.Bound().Center().Lat(), f.Bound().Center().Lon(), 7)
+		nf.Properties["id"] = geohash.Encode(f.Bound().Center().Lat(), f.Bound().Center().Lon(), 20)
 		fc2.Append(nf)
 	}
 	js, _ := fc2.MarshalJSON()

@@ -3,7 +3,6 @@ module github.com/earth-genome/mt-grid
 go 1.22.0
 
 require (
-	github.com/mmcloughlin/geohash v0.10.0
 	github.com/paulmach/orb v0.11.1
 	github.com/pierrre/geohash v1.1.1
 )
