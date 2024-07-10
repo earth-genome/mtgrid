@@ -18,8 +18,11 @@ type GridCell struct {
 	orb.Polygon
 }
 
+func (gc *GridCell) Geohash(length uint) string {
+	return geohash.EncodeWithPrecision(gc.Bound().Center().Lat(), gc.Bound().Center().Lon(), length)
+}
 func (gc *GridCell) Id() string {
-	return geohash.Encode(gc.Bound().Center().Lat(), gc.Bound().Center().Lon())
+	return geohash.EncodeWithPrecision(gc.Bound().Center().Lat(), gc.Bound().Center().Lon(), 20)
 }
 
 type Grid struct {

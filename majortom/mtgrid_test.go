@@ -130,9 +130,6 @@ func TestCount(t *testing.T) {
 	grid := New(320, true)
 	count := grid.CountCells(&p)
 	fmt.Println(count)
-	//49,923,554,414,992,355,441
-	//5, 100, 000, 000, 000, 000
-
 }
 
 func TestSimple(t *testing.T) {
