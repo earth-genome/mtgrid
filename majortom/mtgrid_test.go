@@ -3,6 +3,7 @@ package majortom
 import (
 	"fmt"
 	"github.com/paulmach/orb"
+	"github.com/paulmach/orb/encoding/wkt"
 	"github.com/paulmach/orb/geojson"
 	"github.com/paulmach/orb/maptile"
 	"github.com/pierrre/geohash"
@@ -10,41 +11,41 @@ import (
 )
 
 //	var world = `{
-//	 "type": "FeatureCollection",
-//	 "features": [
-//	   {
-//	     "type": "Feature",
-//	     "properties": {},
-//	     "geometry": {
-//	       "coordinates": [
-//	         [
-//	           [
-//	             -180.0,
-//	             -85.06
-//	           ],
-//	           [
-//	             -180.0,
-//	             85.06
-//	           ],
-//	           [
-//	             180.0,
-//	             85.06
-//	           ],
-//	           [
-//	             180.0,
-//	             -85.06
-//	           ],
-//	           [
-//	             -180.0,
-//	             -85.06
-//	           ]
-//	         ]
-//	       ],
-//	       "type": "Polygon"
-//	     }
-//	   }
-//	 ]
-//	}`
+//		 "type": "FeatureCollection",
+//		 "features": [
+//		   {
+//		     "type": "Feature",
+//		     "properties": {},
+//		     "geometry": {
+//		       "coordinates": [
+//		         [
+//		           [
+//		             -180.0,
+//		             -85.06
+//		           ],
+//		           [
+//		             -180.0,
+//		             85.06
+//		           ],
+//		           [
+//		             180.0,
+//		             85.06
+//		           ],
+//		           [
+//		             180.0,
+//		             -85.06
+//		           ],
+//		           [
+//		             -180.0,
+//		             -85.06
+//		           ]
+//		         ]
+//		       ],
+//		       "type": "Polygon"
+//		     }
+//		   }
+//		 ]
+//		}`
 var bigSouthampton = `{
   "type": "FeatureCollection",
   "features": [
@@ -121,6 +122,36 @@ var southampton = `
 }
 `
 
+func TestGridCell_Id(t *testing.T) {
+
+	g := New(320, true)
+	cell, err := g.CellFromId("gcrtrujj09r3gfd5jzz5")
+	if err != nil {
+		t.FailNow()
+	} else {
+		t.Logf("Expected: gcrtrujj09r3gfd5jzz5, Got: %s", cell.Id())
+	}
+	t.Log(string(wkt.Marshal(cell.Polygon)))
+	box, err := geohash.Decode("gcrtrujj09r3gfd5jzz5")
+	if err != nil {
+		t.FailNow()
+	}
+	b := orb.Bound{
+		Min: orb.Point{box.Lon.Min, box.Lat.Min},
+		Max: orb.Point{box.Lon.Max, box.Lat.Max},
+	}
+	p := b.ToPolygon()
+	t.Log(string(wkt.Marshal(p)))
+
+	cells, _ := g.TilePolygon(&p)
+	fc := geojson.NewFeatureCollection()
+	for _, c := range cells {
+		fc.Append(geojson.NewFeature(c.Polygon))
+	}
+	json, _ := fc.MarshalJSON()
+	t.Log(string(json))
+}
+
 func TestCount(t *testing.T) {
 	fc, err := geojson.UnmarshalFeatureCollection([]byte(bigSouthampton))
 	if err != nil {
@@ -135,7 +166,7 @@ func TestCount(t *testing.T) {
 
 func TestSimple(t *testing.T) {
 
-	fc, err := geojson.UnmarshalFeatureCollection([]byte(southampton))
+	fc, err := geojson.UnmarshalFeatureCollection([]byte(bigSouthampton))
 	if err != nil {
 		t.FailNow()
 	}
