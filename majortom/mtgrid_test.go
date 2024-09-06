@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/geojson"
+	"github.com/paulmach/orb/maptile"
 	"github.com/pierrre/geohash"
 	"testing"
 )
@@ -227,5 +228,33 @@ func TestIds(t *testing.T) {
 			t.FailNow()
 		}
 	}
+
+}
+
+func TestTile(t *testing.T) {
+
+	mtg := New(320, true)
+	tile := maptile.Tile{
+		X: uint32(5122),
+		Y: uint32(8031),
+		Z: maptile.Zoom(14),
+	}
+	p := tile.Bound().ToPolygon()
+	cells, err := mtg.TilePolygon(&p)
+	if err != nil {
+		t.FailNow()
+	}
+	gridFc := geojson.NewFeatureCollection()
+	for _, cell := range cells {
+		feat := geojson.NewFeature(cell.Polygon)
+		//should be length 20
+		feat.ID = cell.Id()
+		feat.Properties["lon"] = cell.Bound().Center().Lon()
+		feat.Properties["lat"] = cell.Bound().Center().Lat()
+		feat.Properties["id"] = feat.ID
+		gridFc.Append(feat)
+	}
+	js, _ := gridFc.MarshalJSON()
+	print(string(js))
 
 }

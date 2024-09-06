@@ -62,7 +62,7 @@ func (g *Grid) TilePolygon(aoi *orb.Polygon) ([]GridCell, error) {
 
 	tiles := make([]GridCell, 0)
 
-	for rowIdx := int64(startRow); rowIdx <= endRow; rowIdx++ {
+	for rowIdx := startRow; rowIdx <= endRow; rowIdx++ {
 		lat := g.rowLat(rowIdx)
 		lonSpacing := g.lonSpacing(lat)
 		latSpacing := g.latSpacing(rows)
@@ -93,6 +93,7 @@ func (g *Grid) TilePolygon(aoi *orb.Polygon) ([]GridCell, error) {
 			if eastOverlapCell.Bound().Intersects(aoi.Bound()) {
 				tiles = append(tiles, GridCell{eastOverlapCell})
 			}
+
 			southOverlapCell := orb.Polygon{{
 				{lon, lat - halfLatSpacing},
 				{lon + lonSpacing, lat - halfLatSpacing},
@@ -168,11 +169,6 @@ func (g *Grid) CountCells(aoi *orb.Polygon) *big.Int {
 	startRow := max(int64(0), int64((aoi.Bound().Min.Lat()+90)/g.latSpacing(rows)))
 	endRow := min(rows, int64((aoi.Bound().Max.Lat()+90)/g.latSpacing(rows))+1)
 
-	fmt.Printf("start row %v", startRow)
-	fmt.Println()
-	fmt.Printf("end row %v", endRow)
-	fmt.Println()
-
 	tiles := big.NewInt(0)
 	biggestRow := int64(0)
 	for rowIdx := int64(startRow); rowIdx <= endRow; rowIdx++ {
@@ -180,17 +176,13 @@ func (g *Grid) CountCells(aoi *orb.Polygon) *big.Int {
 		lonSpacing := g.lonSpacing(lat)
 
 		endCol := min(int(360/lonSpacing), int((aoi.Bound().Max.Lon()+180)/lonSpacing)+1)
-		//fmt.Println(fmt.Printf("start col %v, end col: %v", startCol, endCol))
 		tiles = tiles.Add(big.NewInt(int64(endCol)), tiles)
 		if int64(endCol) > biggestRow {
 			biggestRow = int64(endCol)
 		}
 
 	}
-	fmt.Println()
-	fmt.Printf("biggest row %v", biggestRow)
-	fmt.Println()
-	fmt.Printf("total cells %v", tiles)
+
 	return tiles
 }
 
@@ -202,7 +194,7 @@ func (g *Grid) CellFromId(id string) (*GridCell, error) {
 	}
 	p := orb.Bound{
 		Min: orb.Point{box.Lon.Min, box.Lat.Min},
-		Max: orb.Point{box.Lat.Max, box.Lat.Max},
+		Max: orb.Point{box.Lon.Max, box.Lat.Max},
 	}.ToPolygon()
 	cells, err := g.TilePolygon(&p)
 	if err != nil {
