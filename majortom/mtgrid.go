@@ -5,61 +5,77 @@ import (
 	"github.com/paulmach/orb/planar"
 	"github.com/pierrre/geohash"
 	"math"
-	"math/big"
 	"sync"
 )
 
 const (
-	RADIUS = 6378137
-	LatDeg = 180.0
-	LonDeg = 90.0
+	radius           = 6378137
+	latDeg           = 180.0
+	lonDeg           = 90.0
+	geohashPrecision = 11
 )
 
+// GridCell represents a cell in the grid, defined by an orb.Polygon.
 type GridCell struct {
 	orb.Polygon
 }
 
+// Id returns a geohash string that uniquely identifies the GridCell.
 func (gc *GridCell) Id() string {
-	return geohash.Encode(gc.Bound().Center().Lat(), gc.Bound().Center().Lon(), 20)
+	return geohash.Encode(gc.Bound().Center().Lat(), gc.Bound().Center().Lon(), 11)
 }
 
+// NewGrid creates a new Grid with the specified size and overlap settings.
+func NewGrid(size uint64, overlap bool) *Grid {
+	return &Grid{Size: size, Overlap: overlap}
+}
+
+// Grid represents a geographical grid with specified size and overlap properties.
 type Grid struct {
-	Size    int64
+	Size    uint64
 	Overlap bool
 	Width   int64
 	Height  int64
 }
 
+// latSpacing calculates the latitude spacing between rows based on the number of rows.
 func (g *Grid) latSpacing(rows int64) float64 {
-	return LatDeg / float64(rows)
+	return latDeg / float64(rows)
 }
+
+// rowCount calculates the number of rows in the grid based on the grid size.
 func (g *Grid) rowCount() int64 {
-	return int64(math.Ceil(math.Pi * RADIUS / float64(g.Size)))
+	return int64(math.Ceil(math.Pi * radius / float64(g.Size)))
 }
+
+// rowLat calculates the latitude for a given row index.
 func (g *Grid) rowLat(rowIdx int64) float64 {
-	return float64(-LonDeg) + float64(rowIdx)*g.latSpacing(g.rowCount())
+	return float64(-lonDeg) + float64(rowIdx)*g.latSpacing(g.rowCount())
 }
+
+// lonSpacing calculates the longitude spacing at a given latitude.
 func (g *Grid) lonSpacing(lat float64) float64 {
 
 	latRad := toRad(lat)
-	cir := 2 * math.Pi * RADIUS * math.Cos(latRad)
+	cir := 2 * math.Pi * radius * math.Cos(latRad)
 	cols := math.Ceil(cir / float64(g.Size))
 	return 360 / cols
 }
 
+// toRad converts degrees to radians.
 func toRad(deg float64) float64 {
-	return deg * math.Pi / LatDeg
+	return deg * math.Pi / latDeg
 }
 
-func New(size int64, overlap bool) *Grid {
-	return &Grid{Size: size, Overlap: overlap}
-}
+// GenerateGridCells divides the area of interest (AOI) into grid cells and returns those that intersect with the AOI.
+func (g *Grid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 
-func (g *Grid) TilePolygon(aoi *orb.Polygon) ([]GridCell, error) {
-
+	aoi := geo.Bound().ToPolygon()
 	rows := g.rowCount()
-	startRow := max(int64(0), int64((aoi.Bound().Min.Lat()+LonDeg)/g.latSpacing(rows)))
-	endRow := min(rows, int64((aoi.Bound().Max.Lat()+LonDeg)/g.latSpacing(rows))+1)
+	startRow := max(int64(0), int64((aoi.Bound().Min.Lat()+lonDeg)/g.latSpacing(rows)))
+	endRow := min(rows, int64((aoi.Bound().Max.Lat()+lonDeg)/g.latSpacing(rows))+1)
+	aoiMaxLon := aoi.Bound().Max.Lon()
+	aoiMinLon := aoi.Bound().Min.Lon()
 
 	tiles := make([]GridCell, 0)
 	mutex := &sync.Mutex{}
@@ -74,22 +90,21 @@ func (g *Grid) TilePolygon(aoi *orb.Polygon) ([]GridCell, error) {
 			lat := g.rowLat(rowIdx)
 			lonSpacing := g.lonSpacing(lat)
 			halfLonSpacing := lonSpacing / 2
-			startCol := max(0, int((aoi.Bound().Min.Lon()+LatDeg)/lonSpacing))
-			endCol := min(int(360/lonSpacing), int((aoi.Bound().Max.Lon()+LatDeg)/lonSpacing)+1)
+			startCol := max(0, int((aoiMinLon+latDeg)/lonSpacing))
+			endCol := min(int(360/lonSpacing), int((aoiMaxLon+latDeg)/lonSpacing)+1)
 
 			for colIdx := startCol; colIdx <= endCol; colIdx++ {
-				lon := -LatDeg + float64(colIdx)*lonSpacing
+				lon := -latDeg + float64(colIdx)*lonSpacing
 				p := orb.Polygon{{
 					{lon, lat},
 					{lon + lonSpacing, lat},
 					{lon + lonSpacing, lat + latSpacing},
 					{lon, lat + latSpacing},
 					{lon, lat}}}
-				if p.Bound().Intersects(aoi.Bound()) {
-					mutex.Lock()
-					tiles = append(tiles, GridCell{p})
-					mutex.Unlock()
-				}
+				mutex.Lock()
+				tiles = append(tiles, GridCell{p})
+				mutex.Unlock()
+
 				if g.Overlap {
 					eastOverlapCell := orb.Polygon{{
 						{lon + halfLonSpacing, lat},
@@ -98,11 +113,10 @@ func (g *Grid) TilePolygon(aoi *orb.Polygon) ([]GridCell, error) {
 						{lon + halfLonSpacing, lat + latSpacing},
 						{lon + halfLonSpacing, lat},
 					}}
-					if eastOverlapCell.Bound().Intersects(aoi.Bound()) {
-						mutex.Lock()
-						tiles = append(tiles, GridCell{eastOverlapCell})
-						mutex.Unlock()
-					}
+
+					mutex.Lock()
+					tiles = append(tiles, GridCell{eastOverlapCell})
+					mutex.Unlock()
 
 					southOverlapCell := orb.Polygon{{
 						{lon, lat - halfLatSpacing},
@@ -111,11 +125,11 @@ func (g *Grid) TilePolygon(aoi *orb.Polygon) ([]GridCell, error) {
 						{lon, lat + latSpacing - halfLatSpacing},
 						{lon, lat - halfLatSpacing},
 					}}
-					if southOverlapCell.Bound().Intersects(aoi.Bound()) {
-						mutex.Lock()
-						tiles = append(tiles, GridCell{southOverlapCell})
-						mutex.Unlock()
-					}
+
+					mutex.Lock()
+					tiles = append(tiles, GridCell{southOverlapCell})
+					mutex.Unlock()
+
 				}
 			}
 		}(rowIdx)
@@ -124,88 +138,12 @@ func (g *Grid) TilePolygon(aoi *orb.Polygon) ([]GridCell, error) {
 	return tiles, nil
 }
 
-// TilePolygonToGrid bahves like TilePolygon
-func (g *Grid) TilePolygonToChan(aoi *orb.MultiPolygon, geochan chan GridCell) {
-
-	rows := g.rowCount()
-	startRow := max(int64(0), int64((aoi.Bound().Min.Lat()+LonDeg)/g.latSpacing(rows)))
-	endRow := min(rows, int64((aoi.Bound().Max.Lat()+LonDeg)/g.latSpacing(rows))+1)
-
-	for rowIdx := int64(startRow); rowIdx <= endRow; rowIdx++ {
-		lat := g.rowLat(rowIdx)
-		lonSpacing := g.lonSpacing(lat)
-		latSpacing := g.latSpacing(rows)
-		halfLatSpacing := g.latSpacing(rows) / 2
-		halfLonSpacing := lonSpacing / 2
-
-		startCol := max(0, int((aoi.Bound().Min.Lon()+LatDeg)/lonSpacing))
-		endCol := min(int(360/lonSpacing), int((aoi.Bound().Max.Lon()+LatDeg)/lonSpacing)+1)
-
-		for colIdx := startCol; colIdx <= endCol; colIdx++ {
-			lon := -LatDeg + float64(colIdx)*lonSpacing
-			p := orb.Polygon{{
-				{lon, lat},
-				{lon + lonSpacing, lat},
-				{lon + lonSpacing, lat + latSpacing},
-				{lon, lat + latSpacing},
-				{lon, lat}}}
-			if p.Bound().Intersects(aoi.Bound()) {
-				geochan <- GridCell{p}
-			}
-			eastOverlapCell := orb.Polygon{{
-				{lon + halfLonSpacing, lat},
-				{lon + lonSpacing + halfLonSpacing, lat},
-				{lon + lonSpacing + halfLonSpacing, lat + latSpacing},
-				{lon + halfLonSpacing, lat + latSpacing},
-				{lon + halfLonSpacing, lat},
-			}}
-			if eastOverlapCell.Bound().Intersects(aoi.Bound()) {
-				geochan <- GridCell{eastOverlapCell}
-			}
-			southOverlapCell := orb.Polygon{{
-				{lon, lat - halfLatSpacing},
-				{lon + lonSpacing, lat - halfLatSpacing},
-				{lon + lonSpacing, lat + latSpacing - halfLatSpacing},
-				{lon, lat + latSpacing - halfLatSpacing},
-				{lon, lat - halfLatSpacing},
-			}}
-			if southOverlapCell.Bound().Intersects(aoi.Bound()) {
-				geochan <- GridCell{southOverlapCell}
-			}
-		}
-	}
-	//indicate we're done
-	close(geochan)
-}
-
-func (g *Grid) CountCells(aoi *orb.Polygon) *big.Int {
-
-	rows := g.rowCount()
-	startRow := max(int64(0), int64((aoi.Bound().Min.Lat()+LonDeg)/g.latSpacing(rows)))
-	endRow := min(rows, int64((aoi.Bound().Max.Lat()+LonDeg)/g.latSpacing(rows))+1)
-
-	tiles := big.NewInt(0)
-	biggestRow := int64(0)
-	for rowIdx := int64(startRow); rowIdx <= endRow; rowIdx++ {
-		lat := g.rowLat(rowIdx)
-		lonSpacing := g.lonSpacing(lat)
-
-		endCol := min(int(360/lonSpacing), int((aoi.Bound().Max.Lon()+LatDeg)/lonSpacing)+1)
-		tiles = tiles.Add(big.NewInt(int64(endCol)), tiles)
-		if int64(endCol) > biggestRow {
-			biggestRow = int64(endCol)
-		}
-
-	}
-
-	return tiles
-}
-
+// CellFromId retrieves a GridCell from its geohash ID.
 func (g *Grid) CellFromId(id string) (*GridCell, error) {
 
 	searchId := id
-	if len(id) == 20 {
-		searchId = id[0:18]
+	if len(id) > geohashPrecision {
+		searchId = id[0 : geohashPrecision-1]
 	}
 
 	box, err := geohash.Decode(searchId)
@@ -218,7 +156,7 @@ func (g *Grid) CellFromId(id string) (*GridCell, error) {
 	}
 	p := b.ToPolygon()
 	centroid := b.Center()
-	cells, err := g.TilePolygon(&p)
+	cells, err := g.GenerateGridCells(&p)
 	if err != nil {
 		return nil, err
 	}

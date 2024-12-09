@@ -1,7 +1,6 @@
 package majortom
 
 import (
-	"fmt"
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/encoding/wkt"
 	"github.com/paulmach/orb/geojson"
@@ -124,15 +123,15 @@ var southampton = `
 
 func TestGridCell_Id(t *testing.T) {
 
-	g := New(320, true)
-	cell, err := g.CellFromId("gcrtrujj09r3gfd5jzz5")
+	g := NewGrid(320, true)
+	cell, err := g.CellFromId("gcrtrujj09r")
 	if err != nil {
 		t.FailNow()
 	} else {
-		t.Logf("Expected: gcrtrujj09r3gfd5jzz5, Got: %s", cell.Id())
+		t.Logf("Expected: gcrtrujj09r, Got: %s", cell.Id())
 	}
 	t.Log(string(wkt.Marshal(cell.Polygon)))
-	box, err := geohash.Decode("gcrtrujj09r3gfd5jzz5")
+	box, err := geohash.Decode("gcrtrujj09r")
 	if err != nil {
 		t.FailNow()
 	}
@@ -143,25 +142,13 @@ func TestGridCell_Id(t *testing.T) {
 	p := b.ToPolygon()
 	t.Log(string(wkt.Marshal(p)))
 
-	cells, _ := g.TilePolygon(&p)
+	cells, _ := g.GenerateGridCells(&p)
 	fc := geojson.NewFeatureCollection()
 	for _, c := range cells {
 		fc.Append(geojson.NewFeature(c.Polygon))
 	}
 	json, _ := fc.MarshalJSON()
 	t.Log(string(json))
-}
-
-func TestCount(t *testing.T) {
-	fc, err := geojson.UnmarshalFeatureCollection([]byte(bigSouthampton))
-	if err != nil {
-		t.FailNow()
-	}
-	g := fc.Features[0].Geometry
-	p := g.(orb.Polygon)
-	grid := New(320, true)
-	count := grid.CountCells(&p)
-	fmt.Println(count)
 }
 
 func TestSimple(t *testing.T) {
@@ -172,8 +159,8 @@ func TestSimple(t *testing.T) {
 	}
 	g := fc.Features[0].Geometry
 	p := g.(orb.Polygon)
-	grid := New(320, true)
-	cells, err := grid.TilePolygon(&p)
+	grid := NewGrid(320, true)
+	cells, err := grid.GenerateGridCells(&p)
 	if err != nil {
 		t.FailNow()
 	}
@@ -198,8 +185,8 @@ func TestOffsets(t *testing.T) {
 	}
 	g := fc.Features[0].Geometry
 	p := g.(orb.Polygon)
-	grid := New(320, true)
-	smallerAoiCells, _ := grid.TilePolygon(&p)
+	grid := NewGrid(320, true)
+	smallerAoiCells, _ := grid.GenerateGridCells(&p)
 
 	fc, err = geojson.UnmarshalFeatureCollection([]byte(bigSouthampton))
 	if err != nil {
@@ -207,10 +194,11 @@ func TestOffsets(t *testing.T) {
 	}
 	g = fc.Features[0].Geometry
 	p = g.(orb.Polygon)
-	largerAoiCells, _ := grid.TilePolygon(&p)
+	largerAoiCells, _ := grid.GenerateGridCells(&p)
 
-	t.Logf("largerAoi: %v", len(largerAoiCells))
-	t.Logf("smallerAoi: %v", len(smallerAoiCells))
+	//t.Logf("largerAoi: %v", len(largerAoiCells))
+	//t.Logf("smallerAoi: %v", len(smallerAoiCells))
+
 	//assert that all cells in the small aoi are also in the big aoi
 	for _, cell := range smallerAoiCells {
 		found := false
@@ -237,8 +225,8 @@ func TestIds(t *testing.T) {
 	}
 	g := fc.Features[0].Geometry
 	p := g.(orb.Polygon)
-	grid := New(320, true)
-	cells, err := grid.TilePolygon(&p)
+	grid := NewGrid(320, true)
+	cells, err := grid.GenerateGridCells(&p)
 	if err != nil {
 		t.FailNow()
 	}
@@ -264,14 +252,14 @@ func TestIds(t *testing.T) {
 
 func TestTile(t *testing.T) {
 
-	mtg := New(320, true)
+	mtg := NewGrid(320, true)
 	tile := maptile.Tile{
 		X: uint32(5122),
 		Y: uint32(8031),
 		Z: maptile.Zoom(14),
 	}
 	p := tile.Bound().ToPolygon()
-	cells, err := mtg.TilePolygon(&p)
+	cells, err := mtg.GenerateGridCells(&p)
 	if err != nil {
 		t.FailNow()
 	}
@@ -288,4 +276,30 @@ func TestTile(t *testing.T) {
 	js, _ := gridFc.MarshalJSON()
 	print(string(js))
 
+}
+
+// TestSmallGrid tests grids of different sizes to ensure that the IDs don't conflict
+func TestSmallGrid(t *testing.T) {
+
+	mtg := NewGrid(1, true)
+	tile := maptile.Tile{
+		X: uint32(5122),
+		Y: uint32(8031),
+		Z: maptile.Zoom(14),
+	}
+	p := tile.Bound().ToPolygon()
+	cells, _ := mtg.GenerateGridCells(&p)
+
+	ids := make(map[string]bool)
+	for _, c := range cells {
+
+		id := c.Id()
+		_, contains := ids[id]
+		if contains {
+			t.Logf("Duplicate id found: %s", id)
+			t.Fail()
+		} else {
+			ids[id] = true
+		}
+	}
 }
