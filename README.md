@@ -1,4 +1,7 @@
 # mtgrid Major TOM Grid
+
+[![Go CI](https://github.com/earth-genome/mtgrid/actions/workflows/smoke.yaml/badge.svg)](https://github.com/earth-genome/mtgrid/actions/workflows/smoke.yaml)
+
 This is an implementation of the ESA [Major TOM](https://github.com/ESA-PhiLab/Major-TOM) equal area grid in Go. 
 
 Before:
