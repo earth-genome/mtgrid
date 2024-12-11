@@ -22,16 +22,16 @@ type GridCell struct {
 
 // Id returns a geohash string that uniquely identifies the GridCell.
 func (gc *GridCell) Id() string {
-	return geohash.Encode(gc.Bound().Center().Lat(), gc.Bound().Center().Lon(), 11)
+	return geohash.Encode(gc.Bound().Center().Lat(), gc.Bound().Center().Lon(), geohashPrecision)
 }
 
-// NewGrid creates a new Grid with the specified size and overlap settings.
-func NewGrid(size uint64, overlap bool) *Grid {
-	return &Grid{Size: size, Overlap: overlap}
+// NewGrid creates a new MajorTomGrid with the specified size and overlap settings.
+func NewGrid(size uint64, overlap bool) *MajorTomGrid {
+	return &MajorTomGrid{Size: size, Overlap: overlap}
 }
 
-// Grid represents a geographical grid with specified size and overlap properties.
-type Grid struct {
+// MajorTomGrid represents a geographical grid with specified size and overlap properties.
+type MajorTomGrid struct {
 	Size    uint64
 	Overlap bool
 	Width   int64
@@ -39,22 +39,22 @@ type Grid struct {
 }
 
 // latSpacing calculates the latitude spacing between rows based on the number of rows.
-func (g *Grid) latSpacing(rows int64) float64 {
+func (g *MajorTomGrid) latSpacing(rows int64) float64 {
 	return latDeg / float64(rows)
 }
 
 // rowCount calculates the number of rows in the grid based on the grid size.
-func (g *Grid) rowCount() int64 {
+func (g *MajorTomGrid) rowCount() int64 {
 	return int64(math.Ceil(math.Pi * radius / float64(g.Size)))
 }
 
 // rowLat calculates the latitude for a given row index.
-func (g *Grid) rowLat(rowIdx int64) float64 {
+func (g *MajorTomGrid) rowLat(rowIdx int64) float64 {
 	return float64(-lonDeg) + float64(rowIdx)*g.latSpacing(g.rowCount())
 }
 
 // lonSpacing calculates the longitude spacing at a given latitude.
-func (g *Grid) lonSpacing(lat float64) float64 {
+func (g *MajorTomGrid) lonSpacing(lat float64) float64 {
 
 	latRad := toRad(lat)
 	cir := 2 * math.Pi * radius * math.Cos(latRad)
@@ -68,7 +68,7 @@ func toRad(deg float64) float64 {
 }
 
 // GenerateGridCells divides the area of interest (AOI) into grid cells and returns those that intersect with the AOI.
-func (g *Grid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
+func (g *MajorTomGrid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 
 	aoi := geo.Bound().ToPolygon()
 	rows := g.rowCount()
@@ -83,7 +83,7 @@ func (g *Grid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 	latSpacing := g.latSpacing(rows)
 	halfLatSpacing := latSpacing / 2
 	var wg sync.WaitGroup
-	for rowIdx := startRow; rowIdx <= endRow; rowIdx++ {
+	for rowIdx := startRow; rowIdx < endRow; rowIdx++ {
 		wg.Add(1)
 		go func(rowIdx int64) {
 			defer wg.Done()
@@ -93,7 +93,7 @@ func (g *Grid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 			startCol := max(0, int((aoiMinLon+latDeg)/lonSpacing))
 			endCol := min(int(360/lonSpacing), int((aoiMaxLon+latDeg)/lonSpacing)+1)
 
-			for colIdx := startCol; colIdx <= endCol; colIdx++ {
+			for colIdx := startCol; colIdx < endCol; colIdx++ {
 				lon := -latDeg + float64(colIdx)*lonSpacing
 				p := orb.Polygon{{
 					{lon, lat},
@@ -114,9 +114,11 @@ func (g *Grid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 						{lon + halfLonSpacing, lat},
 					}}
 
-					mutex.Lock()
-					tiles = append(tiles, GridCell{eastOverlapCell})
-					mutex.Unlock()
+					if eastOverlapCell.Bound().Intersects(aoi.Bound()) {
+						mutex.Lock()
+						tiles = append(tiles, GridCell{eastOverlapCell})
+						mutex.Unlock()
+					}
 
 					southOverlapCell := orb.Polygon{{
 						{lon, lat - halfLatSpacing},
@@ -125,10 +127,11 @@ func (g *Grid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 						{lon, lat + latSpacing - halfLatSpacing},
 						{lon, lat - halfLatSpacing},
 					}}
-
-					mutex.Lock()
-					tiles = append(tiles, GridCell{southOverlapCell})
-					mutex.Unlock()
+					if southOverlapCell.Bound().Intersects(aoi.Bound()) {
+						mutex.Lock()
+						tiles = append(tiles, GridCell{southOverlapCell})
+						mutex.Unlock()
+					}
 
 				}
 			}
@@ -139,7 +142,7 @@ func (g *Grid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 }
 
 // CellFromId retrieves a GridCell from its geohash ID.
-func (g *Grid) CellFromId(id string) (*GridCell, error) {
+func (g *MajorTomGrid) CellFromId(id string) (*GridCell, error) {
 
 	searchId := id
 	if len(id) > geohashPrecision {

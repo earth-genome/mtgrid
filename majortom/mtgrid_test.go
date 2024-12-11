@@ -164,12 +164,21 @@ func TestSimple(t *testing.T) {
 	if err != nil {
 		t.FailNow()
 	}
+
 	fc2 := geojson.NewFeatureCollection()
 	t.Logf("Cells: %v", len(cells))
 
+	lookup := make(map[string]bool)
 	for _, f := range cells {
-		nf := geojson.NewFeature(f)
-		nf.Properties["id"] = geohash.Encode(f.Bound().Center().Lat(), f.Bound().Center().Lon(), 20)
+		_, exists := lookup[f.Id()]
+		// fail on duplicates
+		if exists {
+			t.FailNow()
+		}
+		lookup[f.Id()] = true
+
+		nf := geojson.NewFeature(f.Polygon)
+		nf.Properties["id"] = f.Id()
 		fc2.Append(nf)
 	}
 	js, _ := fc2.MarshalJSON()
