@@ -2,7 +2,8 @@
 
 [![Go CI](https://github.com/earth-genome/mtgrid/actions/workflows/smoke.yaml/badge.svg)](https://github.com/earth-genome/mtgrid/actions/workflows/smoke.yaml)
 
-This is an implementation of the ESA [Major TOM](https://github.com/ESA-PhiLab/Major-TOM) equal area grid in Go. 
+This is an implementation of the ESA [Major TOM](https://github.com/ESA-PhiLab/Major-TOM) equal area grid in Go.  
+This code is based on work in the ESA-PhiLab repository, specifically [here](https://github.com/ESA-PhiLab/Major-TOM/blob/main/src/grid.py)
 
 
 ## Usage: 
@@ -18,19 +19,15 @@ import (
 
 func main(){
 
-	var someGeojson = ....
-	
-    fc, _ := geojson.UnmarshalFeatureCollection([]byte(someGeojson))
-    
-    g := fc.Features[0].Geometry
-    p := g.(orb.Polygon)
+	//create a simple polygon, this is 1/10th of a degree square
+	p := orb.Polygon{{{0.0, 0.0},{0.0, 0.1},{0.1, 0.1},{0.1, 0.0},{0.0, 0.0}}}
+	//instantiate a new grid with overlaps
     grid := NewGrid(320, true)
+	//generate cells that cover the area
     cells, _ := grid.GenerateGridCells(&p)
-	
-	//do something with cells 
+		//do something with cells 
 	for _, cell := range cells {
-		
-		printf("cell id %s", cell.Id())
+		fmt.Printf("cell id %s", cell.Id())
     }
 }
 

@@ -5,8 +5,10 @@ import (
 	"github.com/paulmach/orb/encoding/wkt"
 	"github.com/paulmach/orb/geojson"
 	"github.com/paulmach/orb/maptile"
+	"github.com/pierrre/assert"
 	"github.com/pierrre/geohash"
 	"testing"
+	"time"
 )
 
 //	var world = `{
@@ -228,34 +230,26 @@ func TestOffsets(t *testing.T) {
 
 func TestIds(t *testing.T) {
 
+	start := time.Now()
 	fc, err := geojson.UnmarshalFeatureCollection([]byte(southampton))
 	if err != nil {
 		t.FailNow()
 	}
+
 	g := fc.Features[0].Geometry
 	p := g.(orb.Polygon)
-	grid := NewGrid(320, true)
-	cells, err := grid.GenerateGridCells(&p)
-	if err != nil {
-		t.FailNow()
-	}
 
+	grid := NewGrid(320, true)
+	cells, _ := grid.GenerateGridCells(&p)
+	t.Logf("Generated %v cells", len(cells))
 	for _, cell := range cells {
 		id := cell.Id()
-		foundCell, err := grid.CellFromId(id)
-		if err != nil {
-			t.Logf("error getting cell: %v", err)
-			t.FailNow()
-		}
-		if foundCell == nil {
-			t.Logf("error getting cell: %v", err)
-			t.FailNow()
-		}
-		if !foundCell.Polygon.Equal(cell.Polygon) {
-			t.Logf("cells are not equal!")
-			t.FailNow()
-		}
+		foundCell, _ := grid.CellFromId(id)
+		assert.Equal(t, foundCell.Id(), cell.Id())
+		assert.True(t, foundCell.Polygon.Equal(cell.Polygon))
 	}
+	end := time.Now()
+	t.Logf("Completed in %v", end.Sub(start))
 
 }
 
