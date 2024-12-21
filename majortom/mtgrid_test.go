@@ -306,3 +306,13 @@ func TestSmallGrid(t *testing.T) {
 		}
 	}
 }
+
+func TestOddTile(t *testing.T) {
+	g := NewGrid(320, true)
+	cell, err := g.CellFromId("qr330j8p802")
+	if err != nil {
+		t.FailNow()
+	} else {
+		t.Logf("Expected: qr330j8p802, Got: %s", cell.Id())
+	}
+}

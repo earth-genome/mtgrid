@@ -1,8 +1,8 @@
 package majortom
 
 import (
+	"errors"
 	"github.com/paulmach/orb"
-	"github.com/paulmach/orb/planar"
 	"github.com/pierrre/geohash"
 	"math"
 	"sync"
@@ -158,23 +158,44 @@ func (g *MajorTomGrid) CellFromId(id string) (*GridCell, error) {
 		Max: orb.Point{box.Lon.Max, box.Lat.Max},
 	}
 	p := b.ToPolygon()
-	centroid := b.Center()
+
 	cells, err := g.GenerateGridCells(&p)
 	if err != nil {
 		return nil, err
 	}
-	leastDist := math.MaxFloat64
-	var closestCell *GridCell
 	for _, cell := range cells {
 		if cell.Id() == id {
 			return &cell, nil
-		} else {
-			dist := planar.Distance(cell.Bound().Center(), centroid)
-			if dist < leastDist {
-				leastDist = dist
-				closestCell = &cell
-			}
 		}
 	}
-	return closestCell, nil
+	//expand bbox by 10% if nothing is found
+	p = expandBound(b, 10).ToPolygon()
+	cells, err = g.GenerateGridCells(p)
+	if err != nil {
+		return nil, err
+	}
+	for _, cell := range cells {
+		if cell.Id() == id {
+			return &cell, nil
+		}
+	}
+	return nil, errors.New("cell not found")
+}
+
+func expandBound(bound orb.Bound, percentage float64) orb.Bound {
+	// Calculate the width and height of the bounding box.
+	width := bound.Max[0] - bound.Min[0]
+	height := bound.Max[1] - bound.Min[1]
+
+	// Calculate the expansion amounts for each dimension.
+	expandX := width * (percentage / 100.0)
+	expandY := height * (percentage / 100.0)
+
+	// Create a new expanded bounding box.
+	newBound := orb.Bound{
+		Min: orb.Point{bound.Min[0] - expandX/2, bound.Min[1] - expandY/2},
+		Max: orb.Point{bound.Max[0] + expandX/2, bound.Max[1] + expandY/2},
+	}
+
+	return newBound
 }
