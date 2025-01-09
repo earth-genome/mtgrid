@@ -164,7 +164,7 @@ func (g *MajorTomGrid) CellFromId(id string) (*GridCell, error) {
 		return nil, err
 	}
 	for _, cell := range cells {
-		if cell.Id() == id {
+		if cell.Id() == searchId {
 			return &cell, nil
 		}
 	}
@@ -175,7 +175,7 @@ func (g *MajorTomGrid) CellFromId(id string) (*GridCell, error) {
 		return nil, err
 	}
 	for _, cell := range cells {
-		if cell.Id() == id {
+		if cell.Id() == searchId {
 			return &cell, nil
 		}
 	}
