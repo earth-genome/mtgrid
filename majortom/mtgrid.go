@@ -146,7 +146,7 @@ func (g *MajorTomGrid) CellFromId(id string) (*GridCell, error) {
 
 	searchId := id
 	if len(id) > geohashPrecision {
-		searchId = id[0 : geohashPrecision-1]
+		searchId = id[0:geohashPrecision]
 	}
 
 	box, err := geohash.Decode(searchId)

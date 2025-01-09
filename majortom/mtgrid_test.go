@@ -311,8 +311,15 @@ func TestOddTile(t *testing.T) {
 	g := NewGrid(320, true)
 	cell, err := g.CellFromId("qr330j8p802")
 	if err != nil {
-		t.FailNow()
+		t.Fail()
 	} else {
 		t.Logf("Expected: qr330j8p802, Got: %s", cell.Id())
 	}
+	cell, err = g.CellFromId("gcp0ywcrhk1t24vzxu52")
+	if err != nil {
+		t.Fail()
+	} else {
+		t.Logf("Expected: gcp0ywcrhk1, Got: %s", cell.Id())
+	}
+
 }
