@@ -128,14 +128,14 @@ var southampton = `
 func TestGridCell_Id(t *testing.T) {
 
 	g := NewGrid(320, true)
-	cell, err := g.CellFromId("gcrtrujj09r")
+	cell, err := g.CellFromId("dr19n8f7v6e")
 	if err != nil {
 		t.FailNow()
 	} else {
-		t.Logf("Expected: gcrtrujj09r, Got: %s", cell.Id())
+		t.Logf("Expected: dr19n8f7v6e, Got: %s", cell.Id())
 	}
 	t.Log(string(wkt.Marshal(cell.Polygon)))
-	box, err := geohash.Decode("gcrtrujj09r")
+	box, err := geohash.Decode("dr19n8f7v6e")
 	if err != nil {
 		t.FailNow()
 	}
