@@ -27,39 +27,34 @@ func (gc *GridCell) Id() string {
 
 // NewGrid creates a new MajorTomGrid with the specified size and overlap settings.
 func NewGrid(size uint64, overlap bool) *MajorTomGrid {
-	return &MajorTomGrid{Size: size, Overlap: overlap}
+	rc := int64(math.Ceil(math.Pi * radius / float64(size)))
+	ls := min((180.0 / float64(rc)), 89.0)
+	mtg := MajorTomGrid{Size: size, Overlap: overlap, rowCount: rc, latSpacing: float64(ls)}
+	return &mtg
 }
 
 // MajorTomGrid represents a geographical grid with specified size and overlap properties.
 type MajorTomGrid struct {
-	Size    uint64
-	Overlap bool
-	Width   int64
-	Height  int64
-}
-
-// latSpacing calculates the latitude spacing between rows based on the number of rows.
-func (g *MajorTomGrid) latSpacing(rows int64) float64 {
-	return latDeg / float64(rows)
-}
-
-// rowCount calculates the number of rows in the grid based on the grid size.
-func (g *MajorTomGrid) rowCount() int64 {
-	return int64(math.Ceil(math.Pi * radius / float64(g.Size)))
+	Size       uint64
+	Overlap    bool
+	Width      int64
+	Height     int64
+	rowCount   int64
+	latSpacing float64
 }
 
 // rowLat calculates the latitude for a given row index.
 func (g *MajorTomGrid) rowLat(rowIdx int64) float64 {
-	return float64(-lonDeg) + float64(rowIdx)*g.latSpacing(g.rowCount())
+	return float64(-lonDeg) + float64(rowIdx)*g.latSpacing
 }
 
 // lonSpacing calculates the longitude spacing at a given latitude.
 func (g *MajorTomGrid) lonSpacing(lat float64) float64 {
 
-	latRad := toRad(lat)
+	latRad := toRad(min(max(lat, -89), 89))
 	cir := 2 * math.Pi * radius * math.Cos(latRad)
 	cols := math.Ceil(cir / float64(g.Size))
-	return 360 / cols
+	return 360 / max(cols, 1)
 }
 
 // toRad converts degrees to radians.
@@ -71,17 +66,28 @@ func toRad(deg float64) float64 {
 func (g *MajorTomGrid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 
 	aoi := geo.Bound().ToPolygon()
-	rows := g.rowCount()
-	startRow := max(int64(0), int64((aoi.Bound().Min.Lat()+lonDeg)/g.latSpacing(rows)))
-	endRow := min(rows, int64((aoi.Bound().Max.Lat()+lonDeg)/g.latSpacing(rows))+1)
+
 	aoiMaxLon := aoi.Bound().Max.Lon()
 	aoiMinLon := aoi.Bound().Min.Lon()
+	if aoiMinLon > aoiMaxLon {
+		aoiMaxLon += 360
+	}
+	minLat := aoi.Bound().Min.Lat()
+	maxLat := aoi.Bound().Max.Lat()
+	startRow := int64(math.Floor((minLat + lonDeg) / g.latSpacing))
+	endRow := int64(math.Ceil((maxLat + lonDeg) / g.latSpacing))
+
+	for g.rowLat(startRow) > minLat+lonDeg+1e-10 {
+		startRow -= 1
+	}
+	for g.rowLat(endRow) < maxLat-1e-10 {
+		endRow += 1
+	}
 
 	tiles := make([]GridCell, 0)
 	mutex := &sync.Mutex{}
 
-	latSpacing := g.latSpacing(rows)
-	halfLatSpacing := latSpacing / 2
+	halfLatSpacing := g.latSpacing / 2
 	var wg sync.WaitGroup
 	for rowIdx := startRow; rowIdx < endRow; rowIdx++ {
 		wg.Add(1)
@@ -90,28 +96,37 @@ func (g *MajorTomGrid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 			lat := g.rowLat(rowIdx)
 			lonSpacing := g.lonSpacing(lat)
 			halfLonSpacing := lonSpacing / 2
-			startCol := max(0, int((aoiMinLon+latDeg)/lonSpacing))
-			endCol := min(int(360/lonSpacing), int((aoiMaxLon+latDeg)/lonSpacing)+1)
+			startCol := int(math.Floor((aoiMinLon + latDeg) / lonSpacing))
+			endCol := int((aoiMaxLon + latDeg) / lonSpacing)
+
+			for (-180.0 + float64(startCol)*lonSpacing) > (aoiMinLon + 1e-10) {
+				startCol -= 1
+			}
+			for (-180.0 + float64(endCol)*lonSpacing) < (aoiMaxLon - 1e-10) {
+				endCol += 1
+			}
 
 			for colIdx := startCol; colIdx < endCol; colIdx++ {
 				lon := -latDeg + float64(colIdx)*lonSpacing
 				p := orb.Polygon{{
 					{lon, lat},
 					{lon + lonSpacing, lat},
-					{lon + lonSpacing, lat + latSpacing},
-					{lon, lat + latSpacing},
+					{lon + lonSpacing, lat + g.latSpacing},
+					{lon, lat + g.latSpacing},
 					{lon, lat}}}
 				mutex.Lock()
 				tiles = append(tiles, GridCell{p})
 				mutex.Unlock()
 
 				if g.Overlap {
+					overlapLon := lon + halfLonSpacing
+					overlapLat := lat + halfLatSpacing
 					eastOverlapCell := orb.Polygon{{
-						{lon + halfLonSpacing, lat},
-						{lon + lonSpacing + halfLonSpacing, lat},
-						{lon + lonSpacing + halfLonSpacing, lat + latSpacing},
-						{lon + halfLonSpacing, lat + latSpacing},
-						{lon + halfLonSpacing, lat},
+						{overlapLon, overlapLat},
+						{overlapLon + lonSpacing, overlapLat},
+						{overlapLon + lonSpacing, overlapLat + g.latSpacing},
+						{overlapLon, overlapLat + g.latSpacing},
+						{overlapLon, overlapLat},
 					}}
 
 					if eastOverlapCell.Bound().Intersects(aoi.Bound()) {
@@ -120,18 +135,18 @@ func (g *MajorTomGrid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 						mutex.Unlock()
 					}
 
-					southOverlapCell := orb.Polygon{{
-						{lon, lat - halfLatSpacing},
-						{lon + lonSpacing, lat - halfLatSpacing},
-						{lon + lonSpacing, lat + latSpacing - halfLatSpacing},
-						{lon, lat + latSpacing - halfLatSpacing},
-						{lon, lat - halfLatSpacing},
-					}}
-					if southOverlapCell.Bound().Intersects(aoi.Bound()) {
-						mutex.Lock()
-						tiles = append(tiles, GridCell{southOverlapCell})
-						mutex.Unlock()
-					}
+					//southOverlapCell := orb.Polygon{{
+					//	{lon, lat - halfLatSpacing},
+					//	{lon + lonSpacing, lat - halfLatSpacing},
+					//	{lon + lonSpacing, lat + g.latSpacing - halfLatSpacing},
+					//	{lon, lat + g.latSpacing - halfLatSpacing},
+					//	{lon, lat - halfLatSpacing},
+					//}}
+					//if southOverlapCell.Bound().Intersects(aoi.Bound()) {
+					//	mutex.Lock()
+					//	tiles = append(tiles, GridCell{southOverlapCell})
+					//	mutex.Unlock()
+					//}
 
 				}
 			}

@@ -1,12 +1,14 @@
 package majortom
 
 import (
+	"encoding/json"
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/encoding/wkt"
 	"github.com/paulmach/orb/geojson"
 	"github.com/paulmach/orb/maptile"
 	"github.com/pierrre/assert"
 	"github.com/pierrre/geohash"
+	"os"
 	"testing"
 	"time"
 )
@@ -149,8 +151,8 @@ func TestGridCell_Id(t *testing.T) {
 	for _, c := range cells {
 		fc.Append(geojson.NewFeature(c.Polygon))
 	}
-	json, _ := fc.MarshalJSON()
-	t.Log(string(json))
+	js, _ := fc.MarshalJSON()
+	t.Log(string(js))
 }
 
 func TestSimple(t *testing.T) {
@@ -320,6 +322,63 @@ func TestOddTile(t *testing.T) {
 		t.Fail()
 	} else {
 		t.Logf("Expected: gcp0ywcrhk1, Got: %s", cell.Id())
+	}
+
+}
+
+func TestPythonCompatibility(t *testing.T) {
+	poly := orb.Polygon{
+		{
+			{-76.33688798683391, 39.56892059705632},
+			{-76.33688798683391, 39.54865173376891},
+			{-76.30633471133426, 39.54865173376891},
+			{-76.30633471133426, 39.56892059705632},
+			{-76.33688798683391, 39.56892059705632},
+		},
+	}
+	mg := NewGrid(320, true)
+	cells, err := mg.GenerateGridCells(poly)
+	if err != nil {
+		t.Fatalf("failed to generate grid cells: %v", err)
+	}
+
+	// Load the output.geojson file
+	file, err := os.Open("../python_output.geojson")
+	if err != nil {
+		t.Fatalf("failed to open output.geojson file: %v", err)
+	}
+	defer file.Close()
+
+	// Decode the GeoJSON file
+	featureCollection := geojson.NewFeatureCollection()
+	if err := json.NewDecoder(file).Decode(&featureCollection); err != nil {
+		t.Fatalf("failed to decode geojson: %v", err)
+	}
+
+	// Ensure the features match the grid cells
+	assert.Equal(t, len(featureCollection.Features), len(cells))
+	// Compare each feature geometry to the generated grid cells
+	for _, feature := range featureCollection.Features {
+		featurePolygon, ok := feature.Geometry.(orb.Polygon)
+		if !ok {
+			t.Errorf("geometry in feature is not a polygon: %v", feature.Geometry)
+			continue
+		}
+
+		// Check if the feature exists in the grid cells
+		found := false
+		for _, cell := range cells {
+
+			if featurePolygon.Equal(cell.Polygon) {
+				assert.Equal(t, feature.Properties["cell_id"].(string), cell.Id())
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("feature geometry %v not found in grid cells", featurePolygon)
+		}
 	}
 
 }
