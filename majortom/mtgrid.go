@@ -2,10 +2,12 @@ package majortom
 
 import (
 	"errors"
-	"github.com/paulmach/orb"
-	"github.com/pierrre/geohash"
 	"math"
 	"sync"
+
+	"github.com/paulmach/orb"
+	"github.com/pierrre/geohash"
+	predicates "github.com/tingold/orb-predicates"
 )
 
 const (
@@ -62,18 +64,80 @@ func toRad(deg float64) float64 {
 	return deg * math.Pi / latDeg
 }
 
+// derefGeometry returns the underlying value type for pointer geometry types.
+// The orb-predicates library's type switches only match value types (e.g. orb.Polygon),
+// not pointer types (e.g. *orb.Polygon), so we must unwrap them.
+func derefGeometry(g orb.Geometry) orb.Geometry {
+	switch v := g.(type) {
+	case *orb.Point:
+		if v == nil {
+			return nil
+		}
+		return *v
+	case *orb.MultiPoint:
+		if v == nil {
+			return nil
+		}
+		return *v
+	case *orb.LineString:
+		if v == nil {
+			return nil
+		}
+		return *v
+	case *orb.MultiLineString:
+		if v == nil {
+			return nil
+		}
+		return *v
+	case *orb.Ring:
+		if v == nil {
+			return nil
+		}
+		return *v
+	case *orb.Polygon:
+		if v == nil {
+			return nil
+		}
+		return *v
+	case *orb.MultiPolygon:
+		if v == nil {
+			return nil
+		}
+		return *v
+	case *orb.Collection:
+		if v == nil {
+			return nil
+		}
+		return *v
+	case *orb.Bound:
+		if v == nil {
+			return nil
+		}
+		return *v
+	default:
+		return g
+	}
+}
+
 // GenerateGridCells divides the area of interest (AOI) into grid cells and returns those that intersect with the AOI.
 func (g *MajorTomGrid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 
-	aoi := geo.Bound().ToPolygon()
+	// Ensure we have a value type for the predicates library.
+	geo = derefGeometry(geo)
+	if geo == nil {
+		return nil, errors.New("geometry must not be nil")
+	}
 
-	aoiMaxLon := aoi.Bound().Max.Lon()
-	aoiMinLon := aoi.Bound().Min.Lon()
+	// Use the bounding box only to determine the row/column search space.
+	aoiBound := geo.Bound()
+
+	aoiMaxLon := aoiBound.Max.Lon()
+	aoiMinLon := aoiBound.Min.Lon()
 	if aoiMinLon > aoiMaxLon {
 		aoiMaxLon += 360
 	}
-	minLat := aoi.Bound().Min.Lat()
-	maxLat := aoi.Bound().Max.Lat()
+	minLat := aoiBound.Min.Lat()
+	maxLat := aoiBound.Max.Lat()
 	startRow := int64(math.Floor((minLat + lonDeg) / g.latSpacing))
 	endRow := int64(math.Ceil((maxLat + lonDeg) / g.latSpacing))
 
@@ -114,9 +178,13 @@ func (g *MajorTomGrid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 					{lon + lonSpacing, lat + g.latSpacing},
 					{lon, lat + g.latSpacing},
 					{lon, lat}}}
-				mutex.Lock()
-				tiles = append(tiles, GridCell{p})
-				mutex.Unlock()
+
+				// Use precise geometric intersection instead of bounding box.
+				if predicates.Intersects(p, geo) {
+					mutex.Lock()
+					tiles = append(tiles, GridCell{p})
+					mutex.Unlock()
+				}
 
 				if g.Overlap {
 					overlapLon := lon + halfLonSpacing
@@ -129,25 +197,11 @@ func (g *MajorTomGrid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 						{overlapLon, overlapLat},
 					}}
 
-					if eastOverlapCell.Bound().Intersects(aoi.Bound()) {
+					if predicates.Intersects(eastOverlapCell, geo) {
 						mutex.Lock()
 						tiles = append(tiles, GridCell{eastOverlapCell})
 						mutex.Unlock()
 					}
-
-					//southOverlapCell := orb.Polygon{{
-					//	{lon, lat - halfLatSpacing},
-					//	{lon + lonSpacing, lat - halfLatSpacing},
-					//	{lon + lonSpacing, lat + g.latSpacing - halfLatSpacing},
-					//	{lon, lat + g.latSpacing - halfLatSpacing},
-					//	{lon, lat - halfLatSpacing},
-					//}}
-					//if southOverlapCell.Bound().Intersects(aoi.Bound()) {
-					//	mutex.Lock()
-					//	tiles = append(tiles, GridCell{southOverlapCell})
-					//	mutex.Unlock()
-					//}
-
 				}
 			}
 		}(rowIdx)
