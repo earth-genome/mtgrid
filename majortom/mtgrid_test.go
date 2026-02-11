@@ -217,7 +217,7 @@ func TestOffsets(t *testing.T) {
 		found := false
 		for _, cell2 := range largerAoiCells {
 
-			if cell2.Polygon.Equal(cell.Polygon) {
+			if cell2.Equal(cell.Polygon) {
 				found = true
 			}
 		}
@@ -248,7 +248,7 @@ func TestIds(t *testing.T) {
 		id := cell.Id()
 		foundCell, _ := grid.CellFromId(id)
 		assert.Equal(t, foundCell.Id(), cell.Id())
-		assert.True(t, foundCell.Polygon.Equal(cell.Polygon))
+		assert.True(t, foundCell.Equal(cell.Polygon))
 	}
 	end := time.Now()
 	t.Logf("Completed in %v", end.Sub(start))
@@ -409,7 +409,11 @@ func TestPythonCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open output.geojson file: %v", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Errorf("close file: %v", err)
+		}
+	}()
 
 	// Decode the GeoJSON file
 	featureCollection := geojson.NewFeatureCollection()
