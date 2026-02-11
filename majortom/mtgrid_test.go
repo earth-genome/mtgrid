@@ -326,6 +326,68 @@ func TestOddTile(t *testing.T) {
 
 }
 
+func BenchmarkGenerateGridCells(b *testing.B) {
+	fc, err := geojson.UnmarshalFeatureCollection([]byte(bigSouthampton))
+	if err != nil {
+		b.Fatal(err)
+	}
+	p := fc.Features[0].Geometry.(orb.Polygon)
+	grid := NewGrid(320, true)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := grid.GenerateGridCells(&p)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkGenerateGridCellsNoOverlap(b *testing.B) {
+	fc, err := geojson.UnmarshalFeatureCollection([]byte(bigSouthampton))
+	if err != nil {
+		b.Fatal(err)
+	}
+	p := fc.Features[0].Geometry.(orb.Polygon)
+	grid := NewGrid(320, false)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := grid.GenerateGridCells(&p)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkCellFromId(b *testing.B) {
+	grid := NewGrid(320, true)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := grid.CellFromId("dr19n8f7v6e")
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkGridCellId(b *testing.B) {
+	p := orb.Polygon{{
+		{-76.34, 39.54},
+		{-76.33, 39.54},
+		{-76.33, 39.55},
+		{-76.34, 39.55},
+		{-76.34, 39.54},
+	}}
+	cell := newGridCell(p)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = cell.Id()
+	}
+}
+
 func TestPythonCompatibility(t *testing.T) {
 	poly := orb.Polygon{
 		{

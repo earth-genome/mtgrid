@@ -20,11 +20,21 @@ const (
 // GridCell represents a cell in the grid, defined by an orb.Polygon.
 type GridCell struct {
 	orb.Polygon
+	id string
+}
+
+// newGridCell creates a GridCell and pre-computes its geohash ID.
+func newGridCell(p orb.Polygon) GridCell {
+	c := p.Bound().Center()
+	return GridCell{
+		Polygon: p,
+		id:      geohash.Encode(c.Lat(), c.Lon(), geohashPrecision),
+	}
 }
 
 // Id returns a geohash string that uniquely identifies the GridCell.
 func (gc *GridCell) Id() string {
-	return geohash.Encode(gc.Bound().Center().Lat(), gc.Bound().Center().Lon(), geohashPrecision)
+	return gc.id
 }
 
 // NewGrid creates a new MajorTomGrid with the specified size and overlap settings.
@@ -136,22 +146,24 @@ func (g *MajorTomGrid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 	if aoiMinLon > aoiMaxLon {
 		aoiMaxLon += 360
 	}
-	minLat := aoiBound.Min.Lat()
-	maxLat := aoiBound.Max.Lat()
-	startRow := int64(math.Floor((minLat + lonDeg) / g.latSpacing))
-	endRow := int64(math.Ceil((maxLat + lonDeg) / g.latSpacing))
+	aoiMinLat := aoiBound.Min.Lat()
+	aoiMaxLat := aoiBound.Max.Lat()
+	startRow := int64(math.Floor((aoiMinLat + lonDeg) / g.latSpacing))
+	endRow := int64(math.Ceil((aoiMaxLat + lonDeg) / g.latSpacing))
 
-	for g.rowLat(startRow) > minLat+lonDeg+1e-10 {
+	for g.rowLat(startRow) > aoiMinLat+lonDeg+1e-10 {
 		startRow -= 1
 	}
-	for g.rowLat(endRow) < maxLat-1e-10 {
+	for g.rowLat(endRow) < aoiMaxLat-1e-10 {
 		endRow += 1
 	}
 
-	tiles := make([]GridCell, 0)
+	estimatedCap := int(endRow-startRow) * 2
+	tiles := make([]GridCell, 0, estimatedCap)
 	mutex := &sync.Mutex{}
 
 	halfLatSpacing := g.latSpacing / 2
+
 	var wg sync.WaitGroup
 	for rowIdx := startRow; rowIdx < endRow; rowIdx++ {
 		wg.Add(1)
@@ -170,39 +182,63 @@ func (g *MajorTomGrid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 				endCol += 1
 			}
 
+			// Collect results locally to reduce mutex contention.
+			var localTiles []GridCell
+
 			for colIdx := startCol; colIdx < endCol; colIdx++ {
 				lon := -latDeg + float64(colIdx)*lonSpacing
+				cellMaxLon := lon + lonSpacing
+				cellMaxLat := lat + g.latSpacing
+
+				// Inline bounding-box pre-check to avoid predicate dispatch overhead.
+				if cellMaxLon < aoiMinLon || lon > aoiMaxLon ||
+					cellMaxLat < aoiMinLat || lat > aoiMaxLat {
+					continue
+				}
+
 				p := orb.Polygon{{
 					{lon, lat},
-					{lon + lonSpacing, lat},
-					{lon + lonSpacing, lat + g.latSpacing},
-					{lon, lat + g.latSpacing},
+					{cellMaxLon, lat},
+					{cellMaxLon, cellMaxLat},
+					{lon, cellMaxLat},
 					{lon, lat}}}
 
-				// Use precise geometric intersection instead of bounding box.
+				// Use precise geometric intersection.
 				if predicates.Intersects(p, geo) {
-					mutex.Lock()
-					tiles = append(tiles, GridCell{p})
-					mutex.Unlock()
+					localTiles = append(localTiles, newGridCell(p))
 				}
 
 				if g.Overlap {
 					overlapLon := lon + halfLonSpacing
 					overlapLat := lat + halfLatSpacing
+					overlapMaxLon := overlapLon + lonSpacing
+					overlapMaxLat := overlapLat + g.latSpacing
+
+					// Inline bounding-box pre-check for overlap cell.
+					if overlapMaxLon < aoiMinLon || overlapLon > aoiMaxLon ||
+						overlapMaxLat < aoiMinLat || overlapLat > aoiMaxLat {
+						continue
+					}
+
 					eastOverlapCell := orb.Polygon{{
 						{overlapLon, overlapLat},
-						{overlapLon + lonSpacing, overlapLat},
-						{overlapLon + lonSpacing, overlapLat + g.latSpacing},
-						{overlapLon, overlapLat + g.latSpacing},
+						{overlapMaxLon, overlapLat},
+						{overlapMaxLon, overlapMaxLat},
+						{overlapLon, overlapMaxLat},
 						{overlapLon, overlapLat},
 					}}
 
 					if predicates.Intersects(eastOverlapCell, geo) {
-						mutex.Lock()
-						tiles = append(tiles, GridCell{eastOverlapCell})
-						mutex.Unlock()
+						localTiles = append(localTiles, newGridCell(eastOverlapCell))
 					}
 				}
+			}
+
+			// Append all row results under a single lock.
+			if len(localTiles) > 0 {
+				mutex.Lock()
+				tiles = append(tiles, localTiles...)
+				mutex.Unlock()
 			}
 		}(rowIdx)
 	}
@@ -211,60 +247,67 @@ func (g *MajorTomGrid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 }
 
 // CellFromId retrieves a GridCell from its geohash ID.
+// It computes the row/column index directly from the geohash center coordinates
+// rather than generating and searching all cells in the area.
 func (g *MajorTomGrid) CellFromId(id string) (*GridCell, error) {
 
 	searchId := id
 	if len(id) > geohashPrecision {
-		searchId = id[0:geohashPrecision]
+		searchId = id[:geohashPrecision]
 	}
 
 	box, err := geohash.Decode(searchId)
 	if err != nil {
 		return nil, err
 	}
-	b := orb.Bound{
-		Min: orb.Point{box.Lon.Min, box.Lat.Min},
-		Max: orb.Point{box.Lon.Max, box.Lat.Max},
-	}
-	p := b.ToPolygon()
+	centerLat := box.Lat.Mid()
+	centerLon := box.Lon.Mid()
 
-	cells, err := g.GenerateGridCells(&p)
-	if err != nil {
-		return nil, err
-	}
-	for _, cell := range cells {
-		if cell.Id() == searchId {
-			return &cell, nil
+	// Try the direct row/col computation and nearby neighbors to handle
+	// floating-point edge cases and overlap cells.
+	halfLatSpacing := g.latSpacing / 2
+	for _, rowOffset := range []int64{0, -1, 1} {
+		rowIdx := int64(math.Floor((centerLat+lonDeg)/g.latSpacing)) + rowOffset
+		rowLat := g.rowLat(rowIdx)
+		lonSpacing := g.lonSpacing(rowLat)
+		halfLonSpacing := lonSpacing / 2
+
+		for _, colOffset := range []int{0, -1, 1} {
+			colIdx := int(math.Floor((centerLon+latDeg)/lonSpacing)) + colOffset
+			cellLon := -latDeg + float64(colIdx)*lonSpacing
+
+			// Try the regular cell at this row/col.
+			p := orb.Polygon{{
+				{cellLon, rowLat},
+				{cellLon + lonSpacing, rowLat},
+				{cellLon + lonSpacing, rowLat + g.latSpacing},
+				{cellLon, rowLat + g.latSpacing},
+				{cellLon, rowLat},
+			}}
+			cell := newGridCell(p)
+			if cell.Id() == searchId {
+				return &cell, nil
+			}
+
+			// Try the overlap cell offset by half spacing.
+			if g.Overlap {
+				overlapLon := cellLon + halfLonSpacing
+				overlapLat := rowLat + halfLatSpacing
+				op := orb.Polygon{{
+					{overlapLon, overlapLat},
+					{overlapLon + lonSpacing, overlapLat},
+					{overlapLon + lonSpacing, overlapLat + g.latSpacing},
+					{overlapLon, overlapLat + g.latSpacing},
+					{overlapLon, overlapLat},
+				}}
+				oCell := newGridCell(op)
+				if oCell.Id() == searchId {
+					return &oCell, nil
+				}
+			}
 		}
 	}
-	//expand bbox by 10% if nothing is found
-	p = expandBound(b, 10).ToPolygon()
-	cells, err = g.GenerateGridCells(p)
-	if err != nil {
-		return nil, err
-	}
-	for _, cell := range cells {
-		if cell.Id() == searchId {
-			return &cell, nil
-		}
-	}
+
 	return nil, errors.New("cell not found")
 }
 
-func expandBound(bound orb.Bound, percentage float64) orb.Bound {
-	// Calculate the width and height of the bounding box.
-	width := bound.Max[0] - bound.Min[0]
-	height := bound.Max[1] - bound.Min[1]
-
-	// Calculate the expansion amounts for each dimension.
-	expandX := width * (percentage / 100.0)
-	expandY := height * (percentage / 100.0)
-
-	// Create a new expanded bounding box.
-	newBound := orb.Bound{
-		Min: orb.Point{bound.Min[0] - expandX/2, bound.Min[1] - expandY/2},
-		Max: orb.Point{bound.Max[0] + expandX/2, bound.Max[1] + expandY/2},
-	}
-
-	return newBound
-}

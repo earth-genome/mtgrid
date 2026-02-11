@@ -6,7 +6,7 @@ require (
 	github.com/paulmach/orb v0.12.0
 	github.com/pierrre/assert v0.3.2
 	github.com/pierrre/geohash v1.1.1
-	github.com/tingold/orb-predicates v0.0.0-20251206165614-77f070f3efe8
+	github.com/tingold/orb-predicates v0.1.0
 )
 
 require (

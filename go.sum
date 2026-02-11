@@ -50,8 +50,8 @@ github.com/the42/cartconvert v1.0.0/go.mod h1:fWO/msnJVhHqN1yX6OBoxSyfj7TEj1hHiL
 github.com/tidwall/pretty v1.0.0/go.mod h1:XNkn88O1ChpSDQmQeStsy+sBenx6DDtFZJxhVysOjyk=
 github.com/tidwall/pretty v1.2.0 h1:RWIZEg2iJ8/g6fDDYzMpobmaoGh5OLl4AXtGUGPcqCs=
 github.com/tidwall/pretty v1.2.0/go.mod h1:ITEVvHYasfjBbM0u2Pg8T2nJnzm8xPwvNhhsoaGGjNU=
-github.com/tingold/orb-predicates v0.0.0-20251206165614-77f070f3efe8 h1:lBxClRfF3qlVw1GmgSZ5NIP8HSh9GFvjPYnC+gfbokM=
-github.com/tingold/orb-predicates v0.0.0-20251206165614-77f070f3efe8/go.mod h1:5h4KCQ4nlF9e1w5xujIE8w6TCpwuIxPy3aJPDldFzCA=
+github.com/tingold/orb-predicates v0.1.0 h1:5E40I+QatG/FoR80wnpPeCj4SnXndkx/dXjz9JkFOG8=
+github.com/tingold/orb-predicates v0.1.0/go.mod h1:5h4KCQ4nlF9e1w5xujIE8w6TCpwuIxPy3aJPDldFzCA=
 github.com/xdg-go/pbkdf2 v1.0.0/go.mod h1:jrpuAogTd400dnrH08LKmI/xc1MbPOebTwRqcT5RDeI=
 github.com/xdg-go/scram v1.1.1/go.mod h1:RaEWvsqvNKKvBPvcKeFjrG2cJqOkHTiyTpzz23ni57g=
 github.com/xdg-go/stringprep v1.0.3/go.mod h1:W3f5j4i+9rC0kuIEJL0ky1VpHXQU3ocBgklLGvcBnW8=
