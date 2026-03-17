@@ -2,15 +2,18 @@ package majortom
 
 import (
 	"encoding/json"
+	"math"
+	"os"
+	"sort"
+	"testing"
+	"time"
+
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/encoding/wkt"
 	"github.com/paulmach/orb/geojson"
 	"github.com/paulmach/orb/maptile"
 	"github.com/pierrre/assert"
 	"github.com/pierrre/geohash"
-	"os"
-	"testing"
-	"time"
 )
 
 //	var world = `{
@@ -128,14 +131,14 @@ var southampton = `
 func TestGridCell_Id(t *testing.T) {
 
 	g := NewGrid(320, true)
-	cell, err := g.CellFromId("dr19n8f7v6e")
+	cell, err := g.CellFromId("dr19n8ggbf9")
 	if err != nil {
 		t.FailNow()
 	} else {
-		t.Logf("Expected: dr19n8f7v6e, Got: %s", cell.Id())
+		t.Logf("Expected: dr19n8ggbf9, Got: %s", cell.Id())
 	}
 	t.Log(string(wkt.Marshal(cell.Polygon)))
-	box, err := geohash.Decode("dr19n8f7v6e")
+	box, err := geohash.Decode("dr19n8ggbf9")
 	if err != nil {
 		t.FailNow()
 	}
@@ -311,19 +314,19 @@ func TestSmallGrid(t *testing.T) {
 
 func TestOddTile(t *testing.T) {
 	g := NewGrid(320, true)
-	cell, err := g.CellFromId("gcp0ywcrhk1")
+	cell, err := g.CellFromId("gcp0yqzxpk4")
 	if err != nil {
 		t.Fail()
 	} else {
-		t.Logf("Expected: gcp0ywcrhk1, Got: %s", cell.Id())
+		t.Logf("Expected: gcp0yqzxpk4, Got: %s", cell.Id())
 	}
-	cell, err = g.CellFromId("gcp0ywcrhk1t24vzxu52")
+	cell, err = g.CellFromId("gcp0yqzxpk4t24vzxu52")
 	if err != nil {
 		t.Fail()
 	} else {
-		t.Logf("Expected: gcp0ywcrhk1, Got: %s", cell.Id())
+		t.Logf("Expected: gcp0yqzxpk4, Got: %s", cell.Id())
 	}
-
+	_ = cell
 }
 
 func BenchmarkGenerateGridCells(b *testing.B) {
@@ -388,6 +391,180 @@ func BenchmarkGridCellId(b *testing.B) {
 	}
 }
 
+// esaLatitudes returns the reference latitude grid lines using the ESA linspace+mod approach.
+func esaLatitudes(distKm float64) []float64 {
+	const earthRadiusKm = 6378.137
+	numDivisions := int(math.Ceil(math.Pi * earthRadiusKm / distKm))
+	lats := make([]float64, numDivisions)
+	step := 180.0 / float64(numDivisions)
+	for i := 0; i < numDivisions; i++ {
+		v := -90.0 + float64(i)*step
+		v = math.Mod(v, 180)
+		if v < 0 {
+			v += 180
+		}
+		lats[i] = v - 90
+	}
+	sort.Float64s(lats)
+	return lats
+}
+
+// esaLongitudes returns the reference longitude grid lines for a given latitude
+// using the ESA linspace+mod approach.
+func esaLongitudes(lat, distKm float64) []float64 {
+	const earthRadiusKm = 6378.137
+	circumference := 2 * math.Pi * earthRadiusKm * math.Cos(lat*math.Pi/180)
+	numDivisions := int(math.Ceil(circumference / distKm))
+	lons := make([]float64, numDivisions)
+	step := 360.0 / float64(numDivisions)
+	for i := 0; i < numDivisions; i++ {
+		v := -180.0 + float64(i)*step
+		v = math.Mod(v, 360)
+		if v < 0 {
+			v += 360
+		}
+		lons[i] = v - 180
+	}
+	sort.Float64s(lons)
+	return lons
+}
+
+func egLatitudes(grid *MajorTomGrid) []float64 {
+	lats := make([]float64, grid.rowCount)
+	for i := int64(0); i < grid.rowCount; i++ {
+		lats[i] = grid.rowLat(i)
+	}
+	return lats
+}
+
+func egLongitudes(grid *MajorTomGrid, lat float64) []float64 {
+	ls := grid.lonSpacing(lat)
+	lo := grid.lonOffset(ls)
+	latRad := toRad(min(max(lat, -89), 89))
+	nCols := int(math.Ceil(2 * math.Pi * radius * math.Cos(latRad) / float64(grid.Size)))
+	lons := make([]float64, nCols)
+	for i := 0; i < nCols; i++ {
+		lons[i] = grid.colLon(i, ls, lo)
+	}
+	return lons
+}
+
+func TestESALatitudeAlignment(t *testing.T) {
+	for _, distKm := range []float64{5, 10, 50, 100} {
+		distM := uint64(distKm * 1000)
+		grid := NewGrid(distM, false)
+		esaLats := esaLatitudes(distKm)
+		egLats := egLatitudes(grid)
+
+		if len(esaLats) != len(egLats) {
+			t.Fatalf("dist=%vkm: latitude count mismatch (%d vs %d)", distKm, len(esaLats), len(egLats))
+		}
+		for i := range esaLats {
+			if math.Abs(egLats[i]-esaLats[i]) > 1e-10 {
+				t.Fatalf("dist=%vkm: latitude[%d] differs: eg=%v esa=%v", distKm, i, egLats[i], esaLats[i])
+			}
+		}
+	}
+}
+
+func TestESALongitudeAlignment(t *testing.T) {
+	for _, distKm := range []float64{5, 10, 50, 100} {
+		distM := uint64(distKm * 1000)
+		grid := NewGrid(distM, false)
+		for _, testLat := range []float64{0.0, 30.0, 45.0, 60.0} {
+			esaLons := esaLongitudes(testLat, distKm)
+			egLons := egLongitudes(grid, testLat)
+
+			if len(esaLons) != len(egLons) {
+				t.Fatalf("dist=%vkm, lat=%v: longitude count mismatch (%d vs %d)", distKm, testLat, len(esaLons), len(egLons))
+			}
+			for i := range esaLons {
+				if math.Abs(egLons[i]-esaLons[i]) > 1e-10 {
+					t.Fatalf("dist=%vkm, lat=%v: longitude[%d] differs: eg=%v esa=%v", distKm, testLat, i, egLons[i], esaLons[i])
+				}
+			}
+		}
+	}
+}
+
+func TestEquatorOnGridLine(t *testing.T) {
+	for _, distKm := range []float64{5, 7, 10, 13, 50, 100} {
+		distM := uint64(distKm * 1000)
+		grid := NewGrid(distM, false)
+		lats := egLatitudes(grid)
+		found := false
+		for _, lat := range lats {
+			if lat == 0.0 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("dist=%vkm: equator (0.0) should be a grid line", distKm)
+		}
+	}
+}
+
+func TestPrimeMeridianOnGridLine(t *testing.T) {
+	for _, distKm := range []float64{5, 7, 10, 13, 50, 100} {
+		distM := uint64(distKm * 1000)
+		grid := NewGrid(distM, false)
+		for _, testLat := range []float64{0.0, 30.0, 60.0} {
+			lons := egLongitudes(grid, testLat)
+			found := false
+			for _, lon := range lons {
+				if lon == 0.0 {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("dist=%vkm, lat=%v: prime meridian (0.0) should be a grid line", distKm, testLat)
+			}
+		}
+	}
+}
+
+func TestMigrateCellIdContainsOldCentroid(t *testing.T) {
+	grid := NewGrid(320, true)
+	oldIds := []string{"dr18zj1ntew", "dr19n8zgg4e", "s000003037z", "6r32gxpn0w4"}
+	for _, oldId := range oldIds {
+		newCell, err := grid.MigrateCellId(oldId)
+		if err != nil {
+			t.Fatalf("MigrateCellId(%s) error: %v", oldId, err)
+		}
+		box, err := geohash.Decode(oldId)
+		if err != nil {
+			t.Fatalf("geohash.Decode(%s) error: %v", oldId, err)
+		}
+		lat := box.Lat.Mid()
+		lon := box.Lon.Mid()
+		b := newCell.Polygon.Bound()
+		if lon < b.Min.Lon() || lon > b.Max.Lon() || lat < b.Min.Lat() || lat > b.Max.Lat() {
+			t.Fatalf("New cell for old ID %s does not contain decoded centroid (%.6f, %.6f)", oldId, lat, lon)
+		}
+	}
+}
+
+func TestMigrateCellIdIsPrimary(t *testing.T) {
+	grid := NewGrid(320, true)
+	newCell, err := grid.MigrateCellId("dr18zj1ntew")
+	if err != nil {
+		t.Fatalf("MigrateCellId error: %v", err)
+	}
+	if len(newCell.Id()) != 11 {
+		t.Fatalf("Expected cell ID of length 11, got %d", len(newCell.Id()))
+	}
+}
+
+func TestMigrateCellIdInvalidShort(t *testing.T) {
+	grid := NewGrid(320, true)
+	_, err := grid.MigrateCellId("short")
+	if err == nil {
+		t.Fatal("Expected error for short cell ID")
+	}
+}
+
 func TestPythonCompatibility(t *testing.T) {
 	poly := orb.Polygon{
 		{
@@ -447,4 +624,80 @@ func TestPythonCompatibility(t *testing.T) {
 		}
 	}
 
+}
+
+type crossLangCell struct {
+	Id     string      `json:"id"`
+	Coords [][]float64 `json:"coords"`
+}
+
+type crossLangCase struct {
+	Count   int             `json:"count"`
+	Cells   []crossLangCell `json:"cells"`
+	Config  struct {
+		D       uint64 `json:"d"`
+		Overlap bool   `json:"overlap"`
+	} `json:"config"`
+	Polygon [][]float64 `json:"polygon"`
+}
+
+func TestCrossLanguageCompatibility(t *testing.T) {
+	data, err := os.ReadFile("../testdata/cross_language_reference.json")
+	if err != nil {
+		t.Fatalf("failed to read cross-language reference: %v", err)
+	}
+
+	var cases map[string]crossLangCase
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatalf("failed to parse reference JSON: %v", err)
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ring := make(orb.Ring, len(tc.Polygon))
+			for i, pt := range tc.Polygon {
+				ring[i] = orb.Point{pt[0], pt[1]}
+			}
+			poly := orb.Polygon{ring}
+
+			grid := NewGrid(tc.Config.D, tc.Config.Overlap)
+			cells, err := grid.GenerateGridCells(poly)
+			if err != nil {
+				t.Fatalf("GenerateGridCells error: %v", err)
+			}
+
+			if len(cells) != tc.Count {
+				t.Fatalf("cell count mismatch: Go=%d Python=%d", len(cells), tc.Count)
+			}
+
+			goIds := make(map[string]GridCell, len(cells))
+			for _, c := range cells {
+				goIds[c.Id()] = c
+			}
+
+			for _, pyCell := range tc.Cells {
+				goCell, ok := goIds[pyCell.Id]
+				if !ok {
+					t.Errorf("Python cell ID %s not found in Go output", pyCell.Id)
+					continue
+				}
+
+				goBound := goCell.Polygon.Bound()
+				pyMinLon := pyCell.Coords[0][0]
+				pyMinLat := pyCell.Coords[0][1]
+				pyMaxLon := pyCell.Coords[2][0]
+				pyMaxLat := pyCell.Coords[2][1]
+
+				if math.Abs(goBound.Min.Lon()-pyMinLon) > 1e-8 ||
+					math.Abs(goBound.Min.Lat()-pyMinLat) > 1e-8 ||
+					math.Abs(goBound.Max.Lon()-pyMaxLon) > 1e-8 ||
+					math.Abs(goBound.Max.Lat()-pyMaxLat) > 1e-8 {
+					t.Errorf("Cell %s coordinates differ:\n  Go:     [%.12f,%.12f]-[%.12f,%.12f]\n  Python: [%.12f,%.12f]-[%.12f,%.12f]",
+						pyCell.Id,
+						goBound.Min.Lon(), goBound.Min.Lat(), goBound.Max.Lon(), goBound.Max.Lat(),
+						pyMinLon, pyMinLat, pyMaxLon, pyMaxLat)
+				}
+			}
+		})
+	}
 }
