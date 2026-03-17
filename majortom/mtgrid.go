@@ -39,9 +39,13 @@ func (gc *GridCell) Id() string {
 
 // NewGrid creates a new MajorTomGrid with the specified size and overlap settings.
 func NewGrid(size uint64, overlap bool) *MajorTomGrid {
-	rc := int64(math.Ceil(math.Pi * radius / float64(size)))
+	rc := int64(math.Max(2, math.Ceil(math.Pi*radius/float64(size))))
 	ls := min((180.0 / float64(rc)), 89.0)
-	mtg := MajorTomGrid{Size: size, Overlap: overlap, rowCount: rc, latSpacing: float64(ls)}
+	var latOff float64
+	if rc%2 != 0 {
+		latOff = ls / 2
+	}
+	mtg := MajorTomGrid{Size: size, Overlap: overlap, rowCount: rc, latSpacing: float64(ls), latOffset: latOff}
 	return &mtg
 }
 
@@ -53,20 +57,39 @@ type MajorTomGrid struct {
 	Height     int64
 	rowCount   int64
 	latSpacing float64
+	latOffset  float64
 }
 
 // rowLat calculates the latitude for a given row index.
 func (g *MajorTomGrid) rowLat(rowIdx int64) float64 {
-	return float64(-lonDeg) + float64(rowIdx)*g.latSpacing
+	return float64(-lonDeg) + g.latOffset + float64(rowIdx)*g.latSpacing
 }
 
 // lonSpacing calculates the longitude spacing at a given latitude.
 func (g *MajorTomGrid) lonSpacing(lat float64) float64 {
-
 	latRad := toRad(min(max(lat, -89), 89))
 	cir := 2 * math.Pi * radius * math.Cos(latRad)
 	cols := math.Ceil(cir / float64(g.Size))
 	return 360 / max(cols, 1)
+}
+
+// lonOffset returns the longitude centering offset for a given longitude spacing.
+// When the number of columns is odd, columns are shifted by half a spacing so
+// that the prime meridian falls on a grid line.
+func (g *MajorTomGrid) lonOffset(lonSpacing float64) float64 {
+	var nCols int
+	if lonSpacing > 0 {
+		nCols = int(math.Round(360 / lonSpacing))
+	}
+	if nCols%2 != 0 {
+		return lonSpacing / 2
+	}
+	return 0
+}
+
+// colLon calculates the longitude for a given column index.
+func (g *MajorTomGrid) colLon(colIdx int, lonSpacing, lonOff float64) float64 {
+	return -latDeg + lonOff + float64(colIdx)*lonSpacing
 }
 
 // toRad converts degrees to radians.
@@ -148,10 +171,10 @@ func (g *MajorTomGrid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 	}
 	aoiMinLat := aoiBound.Min.Lat()
 	aoiMaxLat := aoiBound.Max.Lat()
-	startRow := int64(math.Floor((aoiMinLat + lonDeg) / g.latSpacing))
-	endRow := int64(math.Ceil((aoiMaxLat + lonDeg) / g.latSpacing))
+	startRow := int64(math.Floor((aoiMinLat + lonDeg - g.latOffset) / g.latSpacing))
+	endRow := int64(math.Ceil((aoiMaxLat + lonDeg - g.latOffset) / g.latSpacing))
 
-	for g.rowLat(startRow) > aoiMinLat+lonDeg+1e-10 {
+	for g.rowLat(startRow) > aoiMinLat+1e-10 {
 		startRow -= 1
 	}
 	for g.rowLat(endRow) < aoiMaxLat-1e-10 {
@@ -171,14 +194,15 @@ func (g *MajorTomGrid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 			defer wg.Done()
 			lat := g.rowLat(rowIdx)
 			lonSpacing := g.lonSpacing(lat)
+			lonOff := g.lonOffset(lonSpacing)
 			halfLonSpacing := lonSpacing / 2
-			startCol := int(math.Floor((aoiMinLon + latDeg) / lonSpacing))
-			endCol := int((aoiMaxLon + latDeg) / lonSpacing)
+			startCol := int(math.Floor((aoiMinLon + latDeg - lonOff) / lonSpacing))
+			endCol := int(math.Ceil((aoiMaxLon + latDeg - lonOff) / lonSpacing))
 
-			for (-180.0 + float64(startCol)*lonSpacing) > (aoiMinLon + 1e-10) {
+			for g.colLon(startCol, lonSpacing, lonOff) > (aoiMinLon + 1e-10) {
 				startCol -= 1
 			}
-			for (-180.0 + float64(endCol)*lonSpacing) < (aoiMaxLon - 1e-10) {
+			for g.colLon(endCol, lonSpacing, lonOff) < (aoiMaxLon - 1e-10) {
 				endCol += 1
 			}
 
@@ -186,7 +210,7 @@ func (g *MajorTomGrid) GenerateGridCells(geo orb.Geometry) ([]GridCell, error) {
 			var localTiles []GridCell
 
 			for colIdx := startCol; colIdx < endCol; colIdx++ {
-				lon := -latDeg + float64(colIdx)*lonSpacing
+				lon := g.colLon(colIdx, lonSpacing, lonOff)
 				cellMaxLon := lon + lonSpacing
 				cellMaxLat := lat + g.latSpacing
 
@@ -267,14 +291,15 @@ func (g *MajorTomGrid) CellFromId(id string) (*GridCell, error) {
 	// floating-point edge cases and overlap cells.
 	halfLatSpacing := g.latSpacing / 2
 	for _, rowOffset := range []int64{0, -1, 1} {
-		rowIdx := int64(math.Floor((centerLat+lonDeg)/g.latSpacing)) + rowOffset
+		rowIdx := int64(math.Floor((centerLat+lonDeg-g.latOffset)/g.latSpacing)) + rowOffset
 		rowLat := g.rowLat(rowIdx)
 		lonSpacing := g.lonSpacing(rowLat)
+		lonOff := g.lonOffset(lonSpacing)
 		halfLonSpacing := lonSpacing / 2
 
 		for _, colOffset := range []int{0, -1, 1} {
-			colIdx := int(math.Floor((centerLon+latDeg)/lonSpacing)) + colOffset
-			cellLon := -latDeg + float64(colIdx)*lonSpacing
+			colIdx := int(math.Floor((centerLon+latDeg-lonOff)/lonSpacing)) + colOffset
+			cellLon := g.colLon(colIdx, lonSpacing, lonOff)
 
 			// Try the regular cell at this row/col.
 			p := orb.Polygon{{
@@ -309,5 +334,42 @@ func (g *MajorTomGrid) CellFromId(id string) (*GridCell, error) {
 	}
 
 	return nil, errors.New("cell not found")
+}
+
+// MigrateCellId maps a cell ID from a prior grid version to the current grid.
+// It decodes the geohash to recover the approximate centroid, then returns
+// the current-grid primary cell that contains that point.
+func (g *MajorTomGrid) MigrateCellId(oldId string) (*GridCell, error) {
+	searchId := oldId
+	if len(oldId) > geohashPrecision {
+		searchId = oldId[:geohashPrecision]
+	}
+	if len(searchId) != geohashPrecision {
+		return nil, errors.New("cell ID must be at least 11 characters")
+	}
+
+	box, err := geohash.Decode(searchId)
+	if err != nil {
+		return nil, err
+	}
+	lat := box.Lat.Mid()
+	lon := box.Lon.Mid()
+
+	rowIdx := int64(math.Floor((lat + lonDeg - g.latOffset) / g.latSpacing))
+	rowLat := g.rowLat(rowIdx)
+	lonSpacing := g.lonSpacing(rowLat)
+	lonOff := g.lonOffset(lonSpacing)
+	colIdx := int(math.Floor((lon + latDeg - lonOff) / lonSpacing))
+	cellLon := g.colLon(colIdx, lonSpacing, lonOff)
+
+	p := orb.Polygon{{
+		{cellLon, rowLat},
+		{cellLon + lonSpacing, rowLat},
+		{cellLon + lonSpacing, rowLat + g.latSpacing},
+		{cellLon, rowLat + g.latSpacing},
+		{cellLon, rowLat},
+	}}
+	cell := newGridCell(p)
+	return &cell, nil
 }
 
