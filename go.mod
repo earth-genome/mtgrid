@@ -1,4 +1,4 @@
-module github.com/earth-genome/mt-grid
+module github.com/earth-genome/mtgrid
 
 go 1.26.0
 
