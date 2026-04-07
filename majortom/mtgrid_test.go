@@ -165,9 +165,8 @@ func TestSimple(t *testing.T) {
 		t.FailNow()
 	}
 	g := fc.Features[0].Geometry
-	p := g.(orb.Polygon)
 	grid := NewGrid(320, true)
-	cells, err := grid.GenerateGridCells(&p)
+	cells, err := grid.GenerateGridCells(new(g.(orb.Polygon)))
 	if err != nil {
 		t.FailNow()
 	}
@@ -242,10 +241,8 @@ func TestIds(t *testing.T) {
 	}
 
 	g := fc.Features[0].Geometry
-	p := g.(orb.Polygon)
-
 	grid := NewGrid(320, true)
-	cells, _ := grid.GenerateGridCells(&p)
+	cells, _ := grid.GenerateGridCells(new(g.(orb.Polygon)))
 	t.Logf("Generated %v cells", len(cells))
 	for _, cell := range cells {
 		id := cell.Id()
@@ -266,8 +263,7 @@ func TestTile(t *testing.T) {
 		Y: uint32(8031),
 		Z: maptile.Zoom(14),
 	}
-	p := tile.Bound().ToPolygon()
-	cells, err := mtg.GenerateGridCells(&p)
+	cells, err := mtg.GenerateGridCells(new(tile.Bound().ToPolygon()))
 	if err != nil {
 		t.FailNow()
 	}
@@ -295,8 +291,7 @@ func TestSmallGrid(t *testing.T) {
 		Y: uint32(8031),
 		Z: maptile.Zoom(14),
 	}
-	p := tile.Bound().ToPolygon()
-	cells, _ := mtg.GenerateGridCells(&p)
+	cells, _ := mtg.GenerateGridCells(new(tile.Bound().ToPolygon()))
 
 	ids := make(map[string]bool)
 	for _, c := range cells {
@@ -539,7 +534,7 @@ func TestMigrateCellIdContainsOldCentroid(t *testing.T) {
 		}
 		lat := box.Lat.Mid()
 		lon := box.Lon.Mid()
-		b := newCell.Polygon.Bound()
+		b := newCell.Bound()
 		if lon < b.Min.Lon() || lon > b.Max.Lon() || lat < b.Min.Lat() || lat > b.Max.Lat() {
 			t.Fatalf("New cell for old ID %s does not contain decoded centroid (%.6f, %.6f)", oldId, lat, lon)
 		}
@@ -632,9 +627,9 @@ type crossLangCell struct {
 }
 
 type crossLangCase struct {
-	Count   int             `json:"count"`
-	Cells   []crossLangCell `json:"cells"`
-	Config  struct {
+	Count  int             `json:"count"`
+	Cells  []crossLangCell `json:"cells"`
+	Config struct {
 		D       uint64 `json:"d"`
 		Overlap bool   `json:"overlap"`
 	} `json:"config"`
@@ -682,7 +677,7 @@ func TestCrossLanguageCompatibility(t *testing.T) {
 					continue
 				}
 
-				goBound := goCell.Polygon.Bound()
+				goBound := goCell.Bound()
 				pyMinLon := pyCell.Coords[0][0]
 				pyMinLat := pyCell.Coords[0][1]
 				pyMaxLon := pyCell.Coords[2][0]

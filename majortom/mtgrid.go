@@ -369,7 +369,5 @@ func (g *MajorTomGrid) MigrateCellId(oldId string) (*GridCell, error) {
 		{cellLon, rowLat + g.latSpacing},
 		{cellLon, rowLat},
 	}}
-	cell := newGridCell(p)
-	return &cell, nil
+	return new(newGridCell(p)), nil
 }
-

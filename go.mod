@@ -1,20 +1,17 @@
 module github.com/earth-genome/mt-grid
 
-go 1.24.4
+go 1.26.0
 
 require (
-	github.com/paulmach/orb v0.12.0
-	github.com/pierrre/assert v0.3.2
-	github.com/pierrre/geohash v1.1.1
+	github.com/paulmach/orb v0.13.0
+	github.com/pierrre/assert v0.12.1
+	github.com/pierrre/geohash v1.1.3
 	github.com/tingold/orb-predicates v0.1.0
 )
 
 require (
-	github.com/google/go-cmp v0.6.0 // indirect
-	github.com/pierrre/compare v1.4.2 // indirect
-	github.com/pierrre/go-libs v0.2.14 // indirect
-	github.com/pierrre/pretty v0.0.10 // indirect
-	github.com/stretchr/testify v1.9.0 // indirect
-	github.com/tidwall/pretty v1.2.0 // indirect
-	go.mongodb.org/mongo-driver v1.11.4 // indirect
+	github.com/pierrre/compare v1.4.14 // indirect
+	github.com/pierrre/go-libs v0.28.1 // indirect
+	github.com/pierrre/pretty v0.23.0 // indirect
+	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 )
